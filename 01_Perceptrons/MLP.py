@@ -83,6 +83,7 @@ class MLP:
     def predict(self, X):
         y_pred = self.forward(X)
         return (y_pred >= 0.5).astype(int)
+        # return y_pred
     
 
 ####################################################################################
@@ -95,13 +96,39 @@ class MLP:
 import torch
 import torch.nn as nn
 
-class MLP(nn.Module):
-    def __init__(self, input_dim=2, hidden_dim=4):
+class MLP_torch(nn.Module):
+    def __init__(self, 
+                input_dim, 
+                hidden_dim, 
+                learning_rate=0.1, 
+                num_iters=10000):
+        
         super().__init__()
+
         self.hidden = nn.Linear(input_dim, hidden_dim)
         self.output = nn.Linear(hidden_dim, 1)
+
+        self.lr = learning_rate
+        self.num_iters = num_iters
 
     def forward(self, x):
         x = torch.tanh(self.hidden(x))       # same as NumPy version
         x = torch.sigmoid(self.output(x))    # sigmoid for binary classification
         return x
+
+    def fit(self, X, y, verbose = True):
+        criterion = nn.BCELoss()
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        
+        for epoch in range(self.num_iters):
+            optimizer.zero_grad()
+            outputs = self.forward(X)
+            loss = criterion(outputs, y)
+            loss.backward()
+            optimizer.step()
+            if verbose and epoch % 1000 == 0:
+                print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+    
+    def predict(self, X):
+        y_pred = self.forward(X)
+        return (y_pred >= 0.5)
