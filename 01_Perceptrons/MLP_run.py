@@ -19,22 +19,36 @@ X = np.array([
 ])
 y = np.array([[0], [1], [1], [0]])  # shape: (4, 1)
 
-X_tensor = torch.tensor(X, dtype=torch.float32)
-y_tensor = torch.tensor(y, dtype=torch.float32)
+use_torch = True
+
+if use_torch:
+    X_tensor = torch.tensor(X, dtype=torch.float32)
+    y_tensor = torch.tensor(y, dtype=torch.float32)
+
+    model = mlp.MLP_torch(input_dim=2, hidden_dim=4)
+    model.fit(X_tensor, y_tensor)
+
+    print("Hidden layer weights:\n", model.hidden.weight.data)
+    print("Hidden layer bias:\n", model.hidden.bias.data)
+
+    print("Output layer weights:\n", model.output.weight.data)
+    print("Output layer bias:\n", model.output.bias.data)
 
 
-# Train MLP
-model = mlp.MLP(input_dim=2, hidden_dim=4, learning_rate=0.2, num_iters=10000)
-# model = mlp.MLP_torch(input_dim=2, hidden_dim=4)
+    preds = model.predict(X_tensor)
 
-model.fit(X, y)
-# model.fit(X_tensor, y_tensor)
+else:
+    model = mlp.MLP(input_dim=2, hidden_dim=4, learning_rate=0.2, num_iters=10000)
+    model.fit(X, y)
 
-# Predict
-preds = model.predict(X)
-# preds = model.predict(X_tensor)
+    preds = model.predict(X)
 
 
 print("Predictions:", preds.ravel())
 print("Ground truth:", y.ravel())
 
+print("Hidden layer weights:\n", model.hidden.weight.data)
+print("Hidden layer bias:\n", model.hidden.bias.data)
+
+print("Output layer weights:\n", model.output.weight.data)
+print("Output layer bias:\n", model.output.bias.data)
