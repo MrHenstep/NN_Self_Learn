@@ -18,12 +18,21 @@ import numpy as np
 # model.show_kernel_frequency_response()
 # model.print_kernels()
 
-def show_conv1_kernels(model):
+# def show_conv1_kernels(conv_layer):
+
+#     """Show 3×3 conv kernels as signed heatmaps with optional bias."""
+
+#     W = conv_layer.weight.detach().cpu().numpy()  # (8,1,3,3)
+#     b = conv_layer.bias.detach().cpu().numpy() if conv_layer.bias is not None else None
+
+#     show_conv_kernels(W, b)
+
+
+def show_conv_kernel(conv_layer):
 
     """Show 3×3 conv kernels as signed heatmaps with optional bias."""
-
-    W = model.conv1.weight.detach().cpu().numpy()  # (8,1,3,3)
-    b = model.conv1.bias.detach().cpu().numpy() if model.conv1.bias is not None else None
+    W = conv_layer.weight.detach().cpu().numpy()  # (8,1,3,3)
+    b = conv_layer.bias.detach().cpu().numpy() if conv_layer.bias is not None else None
 
     # normalize each kernel for display
     Wn = W.copy()
@@ -83,11 +92,11 @@ def show_conv1_feature_maps(model, x_one: torch.Tensor, device: torch.device | N
     plt.tight_layout()
     plt.show()
 
-def show_kernel_frequency_response(model):
+def show_kernel_frequency_response(conv_layer):
 
     """Show a crude 2D FFT magnitude of each 3×3 kernel (zero-padded)."""
 
-    W = model.conv1.weight.detach().cpu().numpy()  # (C_out, 1, 3, 3)
+    W = conv_layer.weight.detach().cpu().numpy()  # (C_out, 1, 3, 3)
     C = W.shape[0]
     fig, axes = plt.subplots(1, C, figsize=(1.8*C, 2.2))
     axes = np.atleast_1d(axes)

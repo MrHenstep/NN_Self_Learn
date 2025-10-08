@@ -1,6 +1,7 @@
 how_to_commit.txt
 
 /02_CNNs/data
+/data
 
 *.cpython-*.json
 __pycache__/

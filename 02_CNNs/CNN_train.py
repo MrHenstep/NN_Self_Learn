@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 import CNN_load_MNIST as ldmnist
 import CNN_model as cnnmodel
+import CNN_model_2 as cnnflexi
 import CNN_visualisation as cnnvis
 
 #########################################################################################
@@ -104,56 +105,66 @@ def plot_predictions(model, test_loader, device):
 
 #########################################################################################
 
+if __name__ == "__main__":
 
-random_seed = 0
-torch.manual_seed(random_seed)
+    random_seed = 0
+    torch.manual_seed(random_seed)
 
-# 0. pick GPU if available, else CPU ----------------------------------------------------
+    # 0. pick GPU if available, else CPU ----------------------------------------------------
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
-
-
-# 1. Load MNIST data -------------------------------------------------------
-
-# (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldmnist.load_torchvision_data(torchvision.datasets.MNIST)
-(x_train, y_train), (x_val, y_val), (x_test, y_test) = ldmnist.load_torchvision_data(torchvision.datasets.FashionMNIST)
-
-train_ds = TensorDataset(x_train, y_train)
-val_ds   = TensorDataset(x_val,   y_val)
-test_ds  = TensorDataset(x_test,  y_test)
-
-train_loader = DataLoader(train_ds, batch_size=64, shuffle=True, drop_last=False)
-val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False)
-test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
 
 
-# 2. Create model ------------------------------------------------------------
+    # 1. Load MNIST data -------------------------------------------------------
 
-input_size = x_train.shape[2]  # 28 for MNIST
-model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=10).to(device)
-criterion = torch.nn.CrossEntropyLoss()
+    # (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldmnist.load_torchvision_data(torchvision.datasets.MNIST)
+    (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldmnist.load_torchvision_data(torchvision.datasets.FashionMNIST)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
-scheduler = None
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    train_ds = TensorDataset(x_train, y_train)
+    val_ds   = TensorDataset(x_val,   y_val)
+    test_ds  = TensorDataset(x_test,  y_test)
+
+    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True, drop_last=False)
+    val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False)
+    test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False)
 
 
+    # 2. Create model ------------------------------------------------------------
 
-# 3. Train ---------------------------------------------------------------
+    input_size = x_train.shape[2]  # 28 for MNIST
+    # model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=10).to(device)
+    model = cnnflexi.SimpleCNNFlexi(input_size=input_size, num_classes=10).to(device)
+    
+    criterion = torch.nn.CrossEntropyLoss()
 
-num_epochs = 50
-train_epoch(model, train_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    # scheduler = None
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[15, 25], gamma=0.1)
 
-# 4. Test ----------------------------------------------------------------
 
-test_model(model, test_loader, device)
-# plot_predictions(model, test_loader, device)
+    # 3. Train ---------------------------------------------------------------
 
-# After training:
-# cnnvis.show_conv1_kernels(model)
-cnnvis.show_kernel_frequency_response(model)
-# cnnvis.print_kernels(model)
+    num_epochs = 50
+    train_epoch(model, train_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
 
-# xb, yb = next(iter(test_loader))
-# cnnvis.show_conv1_feature_maps(model, xb[:1], device=device)
+    # 4. Test ----------------------------------------------------------------
+
+    test_model(model, test_loader, device)
+
+    plot_predictions(model, test_loader, device)
+
+    # After training:
+    # cnnvis.show_conv1_kernels(model)
+    # cnnvis.show_kernel_frequency_response(model)
+    # cnnvis.print_kernels(model)
+
+    # xb, yb = next(iter(test_loader))
+    # cnnvis.show_conv1_feature_maps(model, xb[:1], device=device)
+
+    # cnnvis.show_conv_kernel(model.model.conv_block_1[0])  # Show kernels of first conv layer
+    # cnnvis.show_kernel_frequency_response(model.model.conv_block_1[0])  # Show freq response of first conv layer
+
+    # cnnvis.show_conv_kernel(model.model.conv_block_2[0])  # Show kernels of second conv layer
+    # cnnvis.show_kernel_frequency_response(model.model.conv_block_2[0])  # Show freq response of second conv layer
