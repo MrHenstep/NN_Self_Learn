@@ -35,7 +35,35 @@ class SimpleCNNFlexi(nn.Module):
         self.num_conv_blocks += 1
         self.model.add_module(f"conv_block_{self.num_conv_blocks}", block)
 
-        return block
+        return 
+
+    def _make_VGG_block(self, in_channels, out_channels, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=2):
+
+        block = nn.Sequential()
+        
+        for layer_index in range(depth):
+
+            if layer_index == 0:
+                block.append(nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride, padding=padding))
+            else:   
+                block.append(nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride, padding=padding))
+
+            block.append(nn.BatchNorm2d(out_channels))
+            # block.append(nn.GroupNorm(8, out_channels))  # Alternative to BatchNorm
+            block.append(nn.ReLU())
+
+        block.append(nn.MaxPool2d(kernel_size=pool_kernel_size, stride=pool_stride))
+
+        self.num_conv_blocks += 1
+        self.model.add_module(f"conv_block_{self.num_conv_blocks}", block)
+
+        return 
+
+    def _make_dropout(self, p: float = 0.5):
+        self.num_dropout_layers += 1
+        block = nn.Dropout(p=p)
+        self.model.add_module(f"dropout", block)
+        return
 
     def _make_classifier(self, in_features, out_features):
 
@@ -47,6 +75,11 @@ class SimpleCNNFlexi(nn.Module):
         self.model.add_module(f"classifier_{self.num_classifier_layers}", block) 
         return 
     
+    def _make_adaptive_avg_pool(self, output_size=(1,1)):
+        block = nn.AdaptiveAvgPool2d(output_size=output_size)
+        self.model.add_module(f"adaptive_avg_pool", block)
+        return
+
     def _get_num_features_before_classifier(self, input_channels, input_size):
         with torch.no_grad():
             dummy = torch.zeros(1, input_channels, input_size, input_size)
@@ -56,17 +89,16 @@ class SimpleCNNFlexi(nn.Module):
     
     #################################################################################################################
 
-    def __init__(self, input_size, num_classes: int = 10):
+    def __init__(self, input_channels: int, input_size: int, num_classes: int = 10):
         
         super().__init__()
 
-        # Hardcoded for MNIST
-        input_channels = 1
 
         # Set up model as a sequence of layers
         self.model = nn.Sequential()
         self.num_conv_blocks = 0
         self.num_classifier_layers = 0
+        self.num_dropout_layers = 0
 
         # Common layer parameters
         stride = 1
@@ -77,11 +109,35 @@ class SimpleCNNFlexi(nn.Module):
 
         # Conv Block 1
         num_channels_1 = 32
-        self._make_conv_block(input_channels, num_channels_1, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+        depth_1 = 2
+        # self._make_conv_block(input_channels, num_channels_1, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+        self._make_VGG_block(input_channels, num_channels_1, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_1)
+
 
         # Conv Block 2
-        num_channels_2 = 64
-        self._make_conv_block(num_channels_1, num_channels_2, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+        num_channels_2 = 2 * num_channels_1
+        depth_2 = 2
+        # self._make_conv_block(num_channels_1, num_channels_2, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+        self._make_VGG_block(num_channels_1, num_channels_2, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_2)
+
+
+        # # Conv Block 3
+        num_channels_3 = 2 * num_channels_2
+        depth_3 = 3
+        # self._make_conv_block(num_channels_2, num_channels_3, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+        self._make_VGG_block(num_channels_2, num_channels_3, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_3)
+
+
+        # # # Conv Block 4
+        # num_channels_4 = 2 * num_channels_3
+        # # self._make_conv_block(num_channels_3, num_channels_4, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+        # self._make_VGG_block(num_channels_3, num_channels_4, kernel_size, stride, padding, pool_kernel_size, pool_stride)
+
+        # Dropout
+        self._make_dropout(p=0.3)
+
+        # Adaptive Avg Pool to get fixed size output (1x1)
+        self._make_adaptive_avg_pool(output_size=(1,1))
 
         # Final Classifier
         num_features_before_classifier = self._get_num_features_before_classifier(input_channels, input_size)
