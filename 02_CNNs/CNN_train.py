@@ -17,8 +17,18 @@ import time
 
 #########################################################################################
 
-def train_epochs(model, train_loader, criterion, optimizer, scheduler, device, num_epochs: int = 5):
+def train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs: int = 5):
     """Train for `num_epochs` and return a pandas DataFrame with per-epoch metrics.
+
+    Args:
+        model: torch.nn.Module
+        train_loader: DataLoader for training
+        val_loader: DataLoader for validation (required)
+        criterion: loss function
+        optimizer: optimizer
+        scheduler: learning rate scheduler (or None)
+        device: torch.device
+        num_epochs: number of epochs to run
 
     Returned DataFrame columns: ['epoch','train_loss','train_acc','val_loss','val_acc',
     'train_err','val_err','learning_rate','time_elapsed']
@@ -100,7 +110,8 @@ def test_model(model, test_loader, device):
             logits = model(xb)
             test_acc += (logits.argmax(1) == yb).sum().item()
             n_test += xb.size(0)
-    print(f"Test accuracy: {test_acc / n_test:.4f}")
+    # print(f"Test accuracy: {test_acc / n_test:.4f}")
+    print(f"Test error: {1.0 - (test_acc / n_test):.4f}")
 
 def _find_normalize(transform):
     """Return (mean, std) if a transforms.Normalize is present; else None."""
@@ -246,11 +257,20 @@ if __name__ == "__main__":
         # data_set = torchvision.datasets.FashionMNIST
     # (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldd.load_torchvision_data_MNIST(data_set, augment=augment)
 
-    (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldd.load_torchvision_data_cifar10(augment=augment)
+    # Load datasets. The loader now returns Dataset/Subset objects (augment applied on-the-fly)
+    train_res, val_res, test_res = ldd.load_torchvision_data_cifar10(augment=augment)
 
-    train_ds = TensorDataset(x_train, y_train)
-    val_ds   = TensorDataset(x_val,   y_val)
-    test_ds  = TensorDataset(x_test,  y_test)
+    from torch.utils.data import Dataset
+    if isinstance(train_res, Dataset):
+        train_ds = train_res
+        val_ds = val_res
+        test_ds = test_res
+    else:
+        # backward-compatible: loader returned tensors
+        (x_train, y_train), (x_val, y_val), (x_test, y_test) = (train_res, val_res, test_res)
+        train_ds = TensorDataset(x_train, y_train)
+        val_ds   = TensorDataset(x_val,   y_val)
+        test_ds  = TensorDataset(x_test,  y_test)
 
     train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, drop_last=False, num_workers=4)
     val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False, drop_last=False, num_workers=4)
@@ -259,15 +279,33 @@ if __name__ == "__main__":
 
     # 2. Create model ------------------------------------------------------------
 
-    input_channels = x_train.shape[1]  
-    input_size = x_train.shape[2]  
+    # Determine input channels and spatial size from one training sample.
+    def _infer_input_shape(ds):
+        # ds can be a Dataset, Subset, or TensorDataset. Access index 0 to get (img, label)
+        sample = ds[0]
+        if isinstance(sample, (list, tuple)):
+            img = sample[0]
+        else:
+            img = sample
+        if not isinstance(img, torch.Tensor):
+            # try to convert (unlikely for torchvision datasets)
+            img = torch.as_tensor(img)
+        # If accidentally returned a batch, handle that
+        if img.ndim == 4 and img.shape[0] == 1:
+            img = img.squeeze(0)
+        if img.ndim != 3:
+            raise RuntimeError(f"Unexpected image tensor shape: {img.shape}")
+        C, H, W = img.shape
+        return C, H
+
+    input_channels, input_size = _infer_input_shape(train_ds)
     
     # model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=10).to(device)
     # model = cnnflexi.SimpleCNNFlexi(input_channels=input_channels, input_size=input_size, num_classes=10).to(device)
     model = rn.ResNet20(n_classes=10, use_projection=False)
 
     model = model.to(device)
-    print(model)
+    # print(model)
     
     # assert False, "Test stop"
 
@@ -275,8 +313,34 @@ if __name__ == "__main__":
 
     criterion = torch.nn.CrossEntropyLoss()
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
+    # Build optimizer with two param groups: apply weight decay to weights, but
+    # exclude BatchNorm parameters and biases from weight decay (common best-practice).
+    # Build optimizer param groups by module type to reliably exclude BatchNorm
+    # parameters and all biases from weight decay.
+    decay_params = []
+    no_decay_params = []
+
+    # Collect ids of BatchNorm parameters
+    bn_param_ids = set()
+    for module in model.modules():
+        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            for p in module.parameters():
+                bn_param_ids.add(id(p))
+
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if id(p) in bn_param_ids or name.endswith('.bias'):
+            no_decay_params.append(p)
+        else:
+            decay_params.append(p)
+
+    print(f"Optimizer params: decay={len(decay_params)} no_decay={len(no_decay_params)} (bn_params={len(bn_param_ids)})")
+
+    optimizer = torch.optim.SGD([
+        {'params': decay_params, 'weight_decay': 1e-4},
+        {'params': no_decay_params, 'weight_decay': 0.0}
+    ], lr=0.1, momentum=0.9)
     
 
     num_epochs = 200
@@ -292,7 +356,7 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
-    history_df = train_epochs(model, train_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
+    history_df = train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
 
     end_time = time.time()
     print(f"Training time for per epoch: {(end_time - start_time)/num_epochs:.2f} seconds")

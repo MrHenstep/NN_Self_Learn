@@ -36,35 +36,28 @@ def load_torchvision_data_MNIST(dataset, val_split: int = 10000, augment: bool =
         train_transform = transform
         print("No data augmentation for training set")
 
-    # 2. Download data
+    # 2. Download data as dataset objects
     # Create two views of the training set:
-    # - raw_train_dataset: non-augmented (used for computing splits and for validation tensors)
-    # - aug_train_dataset: possibly augmented (used for training tensors when augment=True)
+    # - raw_train_dataset: non-augmented (used for validation)
+    # - aug_train_dataset: possibly augmented (used for training)
     raw_train_dataset = dataset(root="./data", train=True, download=True, transform=transform)
     aug_train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
     test_dataset = dataset(root="./data", train=False, download=True, transform=transform)
 
-    # 3. Stack into tensors
-    # Use raw_train_dataset to get canonical images/labels and determine splits
-    x_all_raw = torch.stack([img for img, _ in raw_train_dataset])
-    y_all = torch.tensor([label for _, label in raw_train_dataset])
+    # 3. Create Subset objects for train/val so augmentation is applied on-the-fly
+    n_total = len(raw_train_dataset)
+    train_indices = list(range(0, n_total - val_split))
+    val_indices = list(range(n_total - val_split, n_total))
 
-    # Use augmented dataset for the training portion if augmentation requested
-    x_all_aug = torch.stack([img for img, _ in aug_train_dataset])
+    from torch.utils.data import Subset
+    train_subset = Subset(aug_train_dataset, train_indices)
+    val_subset = Subset(raw_train_dataset, val_indices)
 
-    x_test = torch.stack([img for img, _ in test_dataset])
-    y_test = torch.tensor([label for _, label in test_dataset])
+    print("Train (subset):", len(train_subset))
+    print("Val (subset):", len(val_subset))
+    print("Test:", len(test_dataset))
 
-    # 4. Split train/val
-    # Keep validation taken from the raw (non-augmented) images; training uses augmented images
-    x_train, y_train = x_all_aug[:-val_split], y_all[:-val_split]
-    x_val, y_val     = x_all_raw[-val_split:], y_all[-val_split:]
-
-    print("Train:", x_train.shape, y_train.shape)
-    print("Val:", x_val.shape, y_val.shape)
-    print("Test:", x_test.shape, y_test.shape)
-
-    return (x_train, y_train), (x_val, y_val), (x_test, y_test)
+    return train_subset, val_subset, test_dataset
 
 
 def load_torchvision_data_cifar10(val_split: int = 5000, augment: bool = True):
@@ -91,41 +84,37 @@ def load_torchvision_data_cifar10(val_split: int = 5000, augment: bool = True):
     ])
 
     if augment:
+        # Standard CIFAR augmentation: pad=4 -> random crop -> horizontal flip.
+        # Apply RandomErasing on the tensor before Normalize so erasure values
+        # are in the image value scale (0..1) rather than in normalized space.
         train_transform = transforms.Compose([
-            transforms.RandomCrop(image_size, padding=4, padding_mode='reflect'),
+            transforms.RandomCrop(image_size, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(mean.tolist(), std.tolist()),
-            transforms.RandomErasing(p=0.5, scale=(0.02, 0.08), ratio=(0.8, 1.25), value='random')
+            transforms.RandomErasing(p=0.5, scale=(0.02, 0.08), ratio=(0.8, 1.25), value='random'),
+            transforms.Normalize(mean.tolist(), std.tolist())
         ])
-        print("Using data augmentation for training set")
+        print("Using data augmentation for training set (pad=4, crop, flip, RandomErasing before Normalize)")
     else:
         train_transform = transform
         print("No data augmentation for training set")
 
-    # 2. Download data
-    # Create raw (non-augmented) and augmented training datasets so we can
-    # build a clean validation set while keeping augmentation baked into
-    # the returned training tensors (preserves existing external API).
+    # 2. Download data as dataset objects
     raw_train_dataset = dataset(root="./data", train=True, download=True, transform=transform)
     aug_train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
     test_dataset  = dataset(root="./data", train=False, download=True, transform=transform)
 
-    # 3. Stack into tensors
-    x_all_raw  = torch.stack([img for img, _ in raw_train_dataset])
-    y_all      = torch.tensor([label for _, label in raw_train_dataset])
-    x_all_aug  = torch.stack([img for img, _ in aug_train_dataset])
-    x_test     = torch.stack([img for img, _ in test_dataset])
-    y_test     = torch.tensor([label for _, label in test_dataset])
+    # 3. Create Subset objects for train/val so augmentation is applied on-the-fly
+    n_total = len(raw_train_dataset)
+    train_indices = list(range(0, n_total - val_split))
+    val_indices = list(range(n_total - val_split, n_total))
 
-    # 4. Split train/val
-    # training tensors come from the augmented dataset (if augment=True),
-    # validation tensors come from the raw dataset (no augmentation)
-    x_train, y_train = x_all_aug[:-val_split], y_all[:-val_split]
-    x_val,   y_val   = x_all_raw[-val_split:], y_all[-val_split:]
+    from torch.utils.data import Subset
+    train_subset = Subset(aug_train_dataset, train_indices)
+    val_subset = Subset(raw_train_dataset, val_indices)
 
-    print("Train:", x_train.shape, y_train.shape)
-    print("Val:",   x_val.shape,   y_val.shape)
-    print("Test:",  x_test.shape,  y_test.shape)
+    print("Train (subset):", len(train_subset))
+    print("Val (subset):", len(val_subset))
+    print("Test:", len(test_dataset))
 
-    return (x_train, y_train), (x_val, y_val), (x_test, y_test)
+    return train_subset, val_subset, test_dataset
