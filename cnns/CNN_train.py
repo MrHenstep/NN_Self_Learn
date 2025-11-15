@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+import time
+
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 from torchvision import transforms
@@ -6,14 +10,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-import CNN_load_datasets as ldd
-import CNN_model as cnnmodel
-import CNN_model_2 as cnnflexi
-import CNN_visualisation as cnnvis
-
-import ResNet_model as rn
-
-import time
+if __package__:
+    from . import CNN_load_datasets as ldd
+    from . import CNN_model as cnnmodel
+    from . import CNN_model_2 as cnnflexi
+    from . import CNN_visualisation as cnnvis
+    from . import ResNet_model as rn
+else:
+    _ROOT = Path(__file__).resolve().parent.parent
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+    from cnns import CNN_load_datasets as ldd
+    from cnns import CNN_model as cnnmodel
+    from cnns import CNN_model_2 as cnnflexi
+    from cnns import CNN_visualisation as cnnvis
+    from cnns import ResNet_model as rn
 
 #########################################################################################
 

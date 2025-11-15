@@ -1,6 +1,6 @@
 how_to_commit.txt
 
-/02_CNNs/data
+/cnns/data
 /data
 
 *.cpython-*.json

@@ -7,7 +7,7 @@
 
 
 import numpy as np
-import MLP as mlp
+from . import MLP as mlp
 import torch
 
 # XOR gate data
