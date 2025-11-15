@@ -4,24 +4,32 @@ from torchvision import transforms
 
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
 import CNN_load_datasets as ldd
 import CNN_model as cnnmodel
 import CNN_model_2 as cnnflexi
 import CNN_visualisation as cnnvis
 
+import ResNet_model as rn
+
 import time
 
 #########################################################################################
 
 def train_epochs(model, train_loader, criterion, optimizer, scheduler, device, num_epochs: int = 5):
-    train_losses, train_accs = [], []
-    val_losses, val_accs = [], []
+    """Train for `num_epochs` and return a pandas DataFrame with per-epoch metrics.
+
+    Returned DataFrame columns: ['epoch','train_loss','train_acc','val_loss','val_acc',
+    'train_err','val_err','learning_rate','time_elapsed']
+    """
+    rows = []
 
     for epoch in range(num_epochs):
 
         model.train()
         running_loss, running_acc, n = 0.0, 0.0, 0
+        time_start = time.time()
 
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
@@ -42,8 +50,6 @@ def train_epochs(model, train_loader, criterion, optimizer, scheduler, device, n
 
         train_loss = running_loss / n
         train_acc  = running_acc / n
-        train_losses.append(train_loss)
-        train_accs.append(train_acc)
 
         # --- Validate ---
         model.eval()
@@ -59,12 +65,30 @@ def train_epochs(model, train_loader, criterion, optimizer, scheduler, device, n
                 n_val += bs
         val_loss /= n_val
         val_acc  /= n_val
-        val_losses.append(val_loss)
-        val_accs.append(val_acc)
 
-        print(f"Epoch {epoch+1}: train_loss={train_loss:.4f} acc={train_acc:.4f} | val_loss={val_loss:.4f} acc={val_acc:.4f} | lr={optimizer.param_groups[0]['lr']:.6f}")
+        time_end = time.time()
+        time_elapsed = time_end - time_start
 
-    return train_losses, train_accs, val_losses, val_accs
+        lr = optimizer.param_groups[0]['lr']
+        train_err = 1.0 - train_acc
+        val_err = 1.0 - val_acc
+
+        print(f"Epoch {epoch+1}: train_loss={train_loss:.4f} train_err={train_err:.4f} | val_loss={val_loss:.4f} val_err={val_err:.4f} | lr={lr:.6f} | time={time_elapsed:.2f}s")
+
+        rows.append({
+            'epoch': epoch+1,
+            'train_loss': train_loss,
+            'train_acc': train_acc,
+            'val_loss': val_loss,
+            'val_acc': val_acc,
+            'train_err': train_err,
+            'val_err': val_err,
+            'learning_rate': lr,
+            'time_elapsed': time_elapsed,
+        })
+
+    history_df = pd.DataFrame(rows)
+    return history_df
 
 def test_model(model, test_loader, device):
     
@@ -162,22 +186,42 @@ def plot_predictions(model, test_loader, device, class_names=None):
     plt.tight_layout()
     plt.show()
 
-def plot_training_curves(tl, ta, vl, va, num_epochs):
+def plot_training_curves(history_df):
+    """Plot training/validation curves from the history DataFrame returned by train_epochs."""
+    num_epochs = len(history_df)
     epochs = np.arange(1, num_epochs+1)
+    tl = history_df['train_loss']
+    vl = history_df['val_loss']
+    ta = history_df['train_acc']
+    va = history_df['val_acc']
+    lr = history_df.get('learning_rate', None)
+
     plt.figure(figsize=(12,5))
     plt.subplot(1,2,1)
     plt.plot(epochs, tl, label='Train Loss')
     plt.plot(epochs, vl, label='Val Loss')
+    if lr is not None:
+        plt.plot(epochs, lr * (lr.max() / lr.max()), label='Learning Rate', linestyle='--')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.subplot(1,2,2)
-    plt.plot(epochs, ta, label='Train Acc')
-    plt.plot(epochs, va, label='Val Acc')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Training and Validation Accuracy')
+    # Plot error (1 - accuracy) instead of accuracy when available
+    te = history_df.get('train_err')
+    ve = history_df.get('val_err')
+    if te is not None and ve is not None:
+        plt.plot(epochs, te, label='Train Error')
+        plt.plot(epochs, ve, label='Val Error')
+        plt.xlabel('Epoch')
+        plt.ylabel('Error')
+        plt.title('Training and Validation Error')
+    else:
+        plt.plot(epochs, ta, label='Train Acc')
+        plt.plot(epochs, va, label='Val Acc')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.title('Training and Validation Accuracy')
     plt.legend()
     plt.show()
 
@@ -197,9 +241,9 @@ if __name__ == "__main__":
     # 1. Load MNIST data -------------------------------------------------------
 
     augment = True
-    # data_set = torchvision.datasets.MNIST
     
-    # data_set = torchvision.datasets.FashionMNIST
+    # data_set = torchvision.datasets.MNIST
+        # data_set = torchvision.datasets.FashionMNIST
     # (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldd.load_torchvision_data_MNIST(data_set, augment=augment)
 
     (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldd.load_torchvision_data_cifar10(augment=augment)
@@ -208,7 +252,7 @@ if __name__ == "__main__":
     val_ds   = TensorDataset(x_val,   y_val)
     test_ds  = TensorDataset(x_test,  y_test)
 
-    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True, drop_last=False, num_workers=4)
+    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, drop_last=False, num_workers=4)
     val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False, drop_last=False, num_workers=4)
     test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False, drop_last=False, num_workers=4)
 
@@ -219,8 +263,10 @@ if __name__ == "__main__":
     input_size = x_train.shape[2]  
     
     # model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=10).to(device)
-    model = cnnflexi.SimpleCNNFlexi(input_channels=input_channels, input_size=input_size, num_classes=10).to(device)
-    
+    # model = cnnflexi.SimpleCNNFlexi(input_channels=input_channels, input_size=input_size, num_classes=10).to(device)
+    model = rn.ResNet20(n_classes=10, use_projection=False)
+
+    model = model.to(device)
     print(model)
     
     # assert False, "Test stop"
@@ -230,22 +276,24 @@ if __name__ == "__main__":
     criterion = torch.nn.CrossEntropyLoss()
 
     # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
     
 
     num_epochs = 200
 
     # scheduler = None
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-5)
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20, 50, 100], gamma=0.1)
+    # Use the common ResNet/CIFAR step schedule: drop LR by 10 at epochs 80 and 120
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 120], gamma=0.1)
+    # Alternative: cosine annealing
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-5)
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.2, total_steps=len(train_loader)*num_epochs,pct_start=0.3)
 
 
     start_time = time.time()
-    
-    tl, ta, vl, va = train_epochs(model, train_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
-    
+
+    history_df = train_epochs(model, train_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
+
     end_time = time.time()
     print(f"Training time for per epoch: {(end_time - start_time)/num_epochs:.2f} seconds")
 
@@ -256,7 +304,7 @@ if __name__ == "__main__":
 
 
     # Plot training curves
-    plot_training_curves(tl, ta, vl, va, num_epochs)
+    plot_training_curves(history_df)
 
     # plot_predictions(model, test_loader, device)
 

@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import matplotlib.pyplot as plt
-import numpy as np
-
 
 class SimpleCNNFlexi(nn.Module):
 
@@ -89,18 +86,9 @@ class SimpleCNNFlexi(nn.Module):
     
     #################################################################################################################
 
-    def __init__(self, input_channels: int, input_size: int, num_classes: int = 10):
+    def make_VGG(self):
         
-        super().__init__()
-
-
-        # Set up model as a sequence of layers
-        self.model = nn.Sequential()
-        self.num_conv_blocks = 0
-        self.num_classifier_layers = 0
-        self.num_dropout_layers = 0
-
-        # Common layer parameters
+              # Common layer parameters
         stride = 1
         padding = 1
         pool_kernel_size = 2
@@ -108,15 +96,15 @@ class SimpleCNNFlexi(nn.Module):
         kernel_size = 3
 
         # Conv Block 1
-        num_channels_1 = 32
-        depth_1 = 2
+        num_channels_1 = 64
+        depth_1 = 3
         # self._make_conv_block(input_channels, num_channels_1, kernel_size, stride, padding, pool_kernel_size, pool_stride)
-        self._make_VGG_block(input_channels, num_channels_1, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_1)
+        self._make_VGG_block(self.input_channels, num_channels_1, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_1)
 
 
         # Conv Block 2
         num_channels_2 = 2 * num_channels_1
-        depth_2 = 2
+        depth_2 = 3
         # self._make_conv_block(num_channels_1, num_channels_2, kernel_size, stride, padding, pool_kernel_size, pool_stride)
         self._make_VGG_block(num_channels_1, num_channels_2, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_2)
 
@@ -127,12 +115,6 @@ class SimpleCNNFlexi(nn.Module):
         # self._make_conv_block(num_channels_2, num_channels_3, kernel_size, stride, padding, pool_kernel_size, pool_stride)
         self._make_VGG_block(num_channels_2, num_channels_3, kernel_size, stride, padding, pool_kernel_size, pool_stride, depth=depth_3)
 
-
-        # # # Conv Block 4
-        # num_channels_4 = 2 * num_channels_3
-        # # self._make_conv_block(num_channels_3, num_channels_4, kernel_size, stride, padding, pool_kernel_size, pool_stride)
-        # self._make_VGG_block(num_channels_3, num_channels_4, kernel_size, stride, padding, pool_kernel_size, pool_stride)
-
         # Dropout
         self._make_dropout(p=0.3)
 
@@ -140,15 +122,36 @@ class SimpleCNNFlexi(nn.Module):
         self._make_adaptive_avg_pool(output_size=(1,1))
 
         # Final Classifier
-        num_features_before_classifier = self._get_num_features_before_classifier(input_channels, input_size)
-        self._make_classifier(num_features_before_classifier, num_classes)
+        num_features_before_classifier = self._get_num_features_before_classifier(self.input_channels, self.input_size)
+        self._make_classifier(num_features_before_classifier, self.num_classes)
 
         # Initialize weights
         self.apply(self._init_weights)
+
+    #################################################################################################################
+    
+    #################################################################################################################
+
+
+
+    #################################################################################################################
+
+    def __init__(self, input_channels=3, input_size=32, num_classes=10):
+        
+        super().__init__()
+
+        self.input_channels = input_channels
+        self.input_size = input_size
+        self.num_classes = num_classes
+
+        # Set up model as a sequence of layers; model counts are for labelling only
+        self.model = nn.Sequential()
+        self.num_conv_blocks = 0
+        self.num_classifier_layers = 0
+        self.num_dropout_layers = 0
 
     def forward(self, x):
         
         return self.model(x)
 
-
-    
+    #################################################################################################################

@@ -37,22 +37,28 @@ def load_torchvision_data_MNIST(dataset, val_split: int = 10000, augment: bool =
         print("No data augmentation for training set")
 
     # 2. Download data
-    train_dataset = dataset(
-        root="./data", train=True, download=True, transform=train_transform
-    )
-    test_dataset = dataset(
-        root="./data", train=False, download=True, transform=transform
-    )
+    # Create two views of the training set:
+    # - raw_train_dataset: non-augmented (used for computing splits and for validation tensors)
+    # - aug_train_dataset: possibly augmented (used for training tensors when augment=True)
+    raw_train_dataset = dataset(root="./data", train=True, download=True, transform=transform)
+    aug_train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
+    test_dataset = dataset(root="./data", train=False, download=True, transform=transform)
 
     # 3. Stack into tensors
-    x_all = torch.stack([img for img, _ in train_dataset])      
-    y_all = torch.tensor([label for _, label in train_dataset]) 
-    x_test = torch.stack([img for img, _ in test_dataset])      
-    y_test = torch.tensor([label for _, label in test_dataset]) 
+    # Use raw_train_dataset to get canonical images/labels and determine splits
+    x_all_raw = torch.stack([img for img, _ in raw_train_dataset])
+    y_all = torch.tensor([label for _, label in raw_train_dataset])
+
+    # Use augmented dataset for the training portion if augmentation requested
+    x_all_aug = torch.stack([img for img, _ in aug_train_dataset])
+
+    x_test = torch.stack([img for img, _ in test_dataset])
+    y_test = torch.tensor([label for _, label in test_dataset])
 
     # 4. Split train/val
-    x_train, y_train = x_all[:-val_split], y_all[:-val_split]   
-    x_val, y_val     = x_all[-val_split:], y_all[-val_split:]   
+    # Keep validation taken from the raw (non-augmented) images; training uses augmented images
+    x_train, y_train = x_all_aug[:-val_split], y_all[:-val_split]
+    x_val, y_val     = x_all_raw[-val_split:], y_all[-val_split:]
 
     print("Train:", x_train.shape, y_train.shape)
     print("Val:", x_val.shape, y_val.shape)
@@ -98,18 +104,25 @@ def load_torchvision_data_cifar10(val_split: int = 5000, augment: bool = True):
         print("No data augmentation for training set")
 
     # 2. Download data
-    train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
+    # Create raw (non-augmented) and augmented training datasets so we can
+    # build a clean validation set while keeping augmentation baked into
+    # the returned training tensors (preserves existing external API).
+    raw_train_dataset = dataset(root="./data", train=True, download=True, transform=transform)
+    aug_train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
     test_dataset  = dataset(root="./data", train=False, download=True, transform=transform)
 
     # 3. Stack into tensors
-    x_all  = torch.stack([img for img, _ in train_dataset])
-    y_all  = torch.tensor([label for _, label in train_dataset])
-    x_test = torch.stack([img for img, _ in test_dataset])
-    y_test = torch.tensor([label for _, label in test_dataset])
+    x_all_raw  = torch.stack([img for img, _ in raw_train_dataset])
+    y_all      = torch.tensor([label for _, label in raw_train_dataset])
+    x_all_aug  = torch.stack([img for img, _ in aug_train_dataset])
+    x_test     = torch.stack([img for img, _ in test_dataset])
+    y_test     = torch.tensor([label for _, label in test_dataset])
 
     # 4. Split train/val
-    x_train, y_train = x_all[:-val_split], y_all[:-val_split]
-    x_val,   y_val   = x_all[-val_split:], y_all[-val_split:]
+    # training tensors come from the augmented dataset (if augment=True),
+    # validation tensors come from the raw dataset (no augmentation)
+    x_train, y_train = x_all_aug[:-val_split], y_all[:-val_split]
+    x_val,   y_val   = x_all_raw[-val_split:], y_all[-val_split:]
 
     print("Train:", x_train.shape, y_train.shape)
     print("Val:",   x_val.shape,   y_val.shape)
