@@ -1,120 +1,189 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Sequence
+
 import torch
-import torchvision
-import torchvision.transforms as transforms
+from torch.utils.data import DataLoader, Dataset, Subset
+from torchvision import datasets, transforms
 
 
-def load_torchvision_data_MNIST(dataset, val_split: int = 10000, augment: bool = False):
+@dataclass(frozen=True)
+class DatasetConfig:
+    key: str
+    dataset_cls: Callable[..., Dataset]
+    default_val_split: int
+    augment_builder: Optional[Callable[[torch.Tensor, torch.Tensor, int], transforms.Compose]]
+    default_augment: bool
+    display_name: str
 
 
-    # 0. Compute mean and std from the training set (with ToTensor only)
-    tmp_dataset = dataset(root="./data", train=True, download=True,
-                          transform=transforms.ToTensor())
-    x_tmp = torch.stack([img for img, _ in tmp_dataset])  # (60000, 1, 28, 28)
-    mean = x_tmp.mean([0,2,3])
-    std  = x_tmp.std([0,2,3])
-    print(f"{dataset.__name__} stats: mean={mean.item():.4f}, std={std.item():.4f}")
+@dataclass
+class DatasetBundle:
+    train: Dataset
+    val: Dataset
+    test: Dataset
+    mean: torch.Tensor
+    std: torch.Tensor
+    image_size: int
+    num_channels: int
+    class_names: Optional[Sequence[str]]
 
-    image_size = x_tmp.shape[-1]
-    print(f"Image size: {image_size}x{image_size}")
 
-    # 1. Transform: to tensor (scales to [0,1], shape (C,H,W))
-    transform = transforms.Compose([
+def _mnist_augment(mean: torch.Tensor, std: torch.Tensor, image_size: int) -> transforms.Compose:
+    mean_list = mean.tolist()
+    std_list = std.tolist()
+    return transforms.Compose([
+        transforms.RandomCrop(image_size, padding=2),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(degrees=8, fill=0),
         transforms.ToTensor(),
-        transforms.Normalize(mean=mean.tolist(), std=std.tolist())        
+        transforms.Normalize(mean_list, std_list),
     ])
 
-    if augment:
-        train_transform = transforms.Compose([
-            transforms.RandomCrop(image_size, padding=2),         # small spatial jitter
-            transforms.RandomHorizontalFlip(p=0.5),       # left-right symmetry
-            transforms.RandomRotation(degrees=8, fill=0),        # slight rotation
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean.tolist(), std=std.tolist())
-        ])
-        print("Using data augmentation for training set")
-    else:
-        train_transform = transform
-        print("No data augmentation for training set")
 
-    # 2. Download data as dataset objects
-    # Create two views of the training set:
-    # - raw_train_dataset: non-augmented (used for validation)
-    # - aug_train_dataset: possibly augmented (used for training)
-    raw_train_dataset = dataset(root="./data", train=True, download=True, transform=transform)
-    aug_train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
-    test_dataset = dataset(root="./data", train=False, download=True, transform=transform)
-
-    # 3. Create Subset objects for train/val so augmentation is applied on-the-fly
-    n_total = len(raw_train_dataset)
-    train_indices = list(range(0, n_total - val_split))
-    val_indices = list(range(n_total - val_split, n_total))
-
-    from torch.utils.data import Subset
-    train_subset = Subset(aug_train_dataset, train_indices)
-    val_subset = Subset(raw_train_dataset, val_indices)
-
-    print("Train (subset):", len(train_subset))
-    print("Val (subset):", len(val_subset))
-    print("Test:", len(test_dataset))
-
-    return train_subset, val_subset, test_dataset
-
-
-def load_torchvision_data_cifar10(val_split: int = 5000, augment: bool = True):
-    import torch, torchvision
-    from torchvision import transforms
-
-    dataset = torchvision.datasets.CIFAR10
-
-    # 0. Compute mean/std from raw data
-    tmp_dataset = dataset(root="./data", train=True, download=True,
-                          transform=transforms.ToTensor())
-    x_tmp = torch.stack([img for img, _ in tmp_dataset])  # (50000, 3, 32, 32)
-    mean = x_tmp.mean([0, 2, 3])
-    std  = x_tmp.std([0, 2, 3])
-    print(f"{dataset.__name__} stats: mean={mean}, std={std}")
-
-    image_size = x_tmp.shape[-1]
-    print(f"Image size: {image_size}x{image_size}")
-
-    # 1. Base transform
-    transform = transforms.Compose([
+def _cifar10_augment(mean: torch.Tensor, std: torch.Tensor, image_size: int) -> transforms.Compose:
+    mean_list = mean.tolist()
+    std_list = std.tolist()
+    return transforms.Compose([
+        transforms.RandomCrop(image_size, padding=4),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean.tolist(), std.tolist())
+        transforms.RandomErasing(p=0.5, scale=(0.02, 0.08), ratio=(0.8, 1.25), value="random"),
+        transforms.Normalize(mean_list, std_list),
     ])
 
-    if augment:
-        # Standard CIFAR augmentation: pad=4 -> random crop -> horizontal flip.
-        # Apply RandomErasing on the tensor before Normalize so erasure values
-        # are in the image value scale (0..1) rather than in normalized space.
-        train_transform = transforms.Compose([
-            transforms.RandomCrop(image_size, padding=4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.RandomErasing(p=0.5, scale=(0.02, 0.08), ratio=(0.8, 1.25), value='random'),
-            transforms.Normalize(mean.tolist(), std.tolist())
-        ])
-        print("Using data augmentation for training set (pad=4, crop, flip, RandomErasing before Normalize)")
+
+_DATASET_REGISTRY: Dict[str, DatasetConfig] = {
+    "mnist": DatasetConfig(
+        key="mnist",
+        dataset_cls=datasets.MNIST,
+        default_val_split=10_000,
+        augment_builder=_mnist_augment,
+        default_augment=False,
+        display_name="MNIST",
+    ),
+    "fashion_mnist": DatasetConfig(
+        key="fashion_mnist",
+        dataset_cls=datasets.FashionMNIST,
+        default_val_split=10_000,
+        augment_builder=_mnist_augment,
+        default_augment=False,
+        display_name="FashionMNIST",
+    ),
+    "cifar10": DatasetConfig(
+        key="cifar10",
+        dataset_cls=datasets.CIFAR10,
+        default_val_split=5_000,
+        augment_builder=_cifar10_augment,
+        default_augment=True,
+        display_name="CIFAR-10",
+    ),
+}
+
+
+def _compute_mean_std(dataset_cls: Callable[..., Dataset], root: str, download: bool) -> tuple[torch.Tensor, torch.Tensor, int, int, Optional[Sequence[str]]]:
+    baseline = dataset_cls(root=root, train=True, download=download, transform=transforms.ToTensor())
+    loader = DataLoader(baseline, batch_size=512, shuffle=False, num_workers=0)
+
+    mean = 0.0
+    second_moment = 0.0
+    count = 0
+
+    for images, _ in loader:
+        images = images.float()
+        batch_size = images.size(0)
+        reshaped = images.view(batch_size, images.size(1), -1)
+        mean += reshaped.mean(dim=2).sum(dim=0)
+        second_moment += (reshaped ** 2).mean(dim=2).sum(dim=0)
+        count += batch_size
+
+    mean /= count
+    variance = second_moment / count - mean ** 2
+    std = torch.sqrt(torch.clamp(variance, min=1e-8))
+
+    sample = baseline[0][0]
+    image_size = sample.shape[-1]
+    num_channels = sample.shape[0]
+    class_names = getattr(baseline, "classes", None)
+
+    return mean, std, image_size, num_channels, class_names
+
+
+def load_dataset(
+    name: str,
+    *,
+    root: str = "./data",
+    val_split: Optional[int] = None,
+    augment: Optional[bool] = None,
+    download: bool = True,
+    verbose: bool = True,
+) -> DatasetBundle:
+    key = name.lower()
+    if key not in _DATASET_REGISTRY:
+        raise ValueError(f"Unknown dataset '{name}'. Available: {sorted(_DATASET_REGISTRY)}")
+
+    config = _DATASET_REGISTRY[key]
+    dataset_cls = config.dataset_cls
+
+    mean, std, image_size, num_channels, class_names = _compute_mean_std(dataset_cls, root=root, download=download)
+    base_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean.tolist(), std.tolist()),
+    ])
+
+    use_augment = config.default_augment if augment is None else augment
+    if use_augment and config.augment_builder is not None:
+        train_transform = config.augment_builder(mean, std, image_size)
     else:
-        train_transform = transform
-        print("No data augmentation for training set")
+        train_transform = base_transform
 
-    # 2. Download data as dataset objects
-    raw_train_dataset = dataset(root="./data", train=True, download=True, transform=transform)
-    aug_train_dataset = dataset(root="./data", train=True, download=True, transform=train_transform)
-    test_dataset  = dataset(root="./data", train=False, download=True, transform=transform)
+    raw_train = dataset_cls(root=root, train=True, download=download, transform=base_transform)
+    aug_train = dataset_cls(root=root, train=True, download=download, transform=train_transform)
+    test_set = dataset_cls(root=root, train=False, download=download, transform=base_transform)
 
-    # 3. Create Subset objects for train/val so augmentation is applied on-the-fly
-    n_total = len(raw_train_dataset)
-    train_indices = list(range(0, n_total - val_split))
-    val_indices = list(range(n_total - val_split, n_total))
+    split = config.default_val_split if val_split is None else val_split
+    if split <= 0 or split >= len(raw_train):
+        raise ValueError(f"val_split must be in (0, {len(raw_train)}), got {split}")
 
-    from torch.utils.data import Subset
-    train_subset = Subset(aug_train_dataset, train_indices)
-    val_subset = Subset(raw_train_dataset, val_indices)
+    train_indices = list(range(0, len(raw_train) - split))
+    val_indices = list(range(len(raw_train) - split, len(raw_train)))
 
-    print("Train (subset):", len(train_subset))
-    print("Val (subset):", len(val_subset))
-    print("Test:", len(test_dataset))
+    train_subset = Subset(aug_train, train_indices)
+    val_subset = Subset(raw_train, val_indices)
 
-    return train_subset, val_subset, test_dataset
+    if verbose:
+        print(f"{config.display_name} stats: mean={mean.tolist()}, std={std.tolist()}")
+        print(f"Image size: {image_size}x{image_size}")
+        print("Using data augmentation for training set" if use_augment else "No data augmentation for training set")
+        print("Train (subset):", len(train_subset))
+        print("Val (subset):", len(val_subset))
+        print("Test:", len(test_set))
+
+    return DatasetBundle(
+        train=train_subset,
+        val=val_subset,
+        test=test_set,
+        mean=mean,
+        std=std,
+        image_size=image_size,
+        num_channels=num_channels,
+        class_names=class_names,
+    )
+
+
+def load_torchvision_data_MNIST(dataset, val_split: int = 10_000, augment: bool = False):
+    name_map = {
+        datasets.MNIST: "mnist",
+        datasets.FashionMNIST: "fashion_mnist",
+    }
+    key = name_map.get(dataset)
+    if key is None:
+        raise ValueError("Unsupported dataset class for MNIST loader.")
+    bundle = load_dataset(key, val_split=val_split, augment=augment)
+    return bundle.train, bundle.val, bundle.test
+
+
+def load_torchvision_data_cifar10(val_split: int = 5_000, augment: bool = True):
+    bundle = load_dataset("cifar10", val_split=val_split, augment=augment)
+    return bundle.train, bundle.val, bundle.test

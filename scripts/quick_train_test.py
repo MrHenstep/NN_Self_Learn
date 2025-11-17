@@ -12,7 +12,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Device:', device)
 
 augment = True
-train_ds, val_ds, test_ds = ldd.load_torchvision_data_cifar10(augment=augment)
+bundle = ldd.load_dataset("cifar10", augment=augment)
+train_ds, val_ds, test_ds = bundle.train, bundle.val, bundle.test
 
 train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, num_workers=4)
 val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False, num_workers=4)

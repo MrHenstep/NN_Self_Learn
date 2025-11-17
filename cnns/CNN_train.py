@@ -1,9 +1,11 @@
+import importlib
 import sys
 from pathlib import Path
 import time
+from typing import Optional
 
 import torch
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader
 from torchvision import transforms
 
 import numpy as np
@@ -16,6 +18,7 @@ if __package__:
     from . import CNN_model_2 as cnnflexi
     from . import CNN_visualisation as cnnvis
     from . import ResNet_model as rn
+    ldd = importlib.reload(ldd)
 else:
     _ROOT = Path(__file__).resolve().parent.parent
     if str(_ROOT) not in sys.path:
@@ -25,6 +28,7 @@ else:
     from cnns import CNN_model_2 as cnnflexi
     from cnns import CNN_visualisation as cnnvis
     from cnns import ResNet_model as rn
+    ldd = importlib.reload(ldd)
 
 #########################################################################################
 
@@ -246,7 +250,6 @@ def plot_training_curves(history_df):
         plt.title('Training and Validation Accuracy')
     plt.legend()
     plt.show()
-
 #########################################################################################
 
 if __name__ == "__main__":
@@ -260,28 +263,18 @@ if __name__ == "__main__":
     print("Using device:", device)
 
 
-    # 1. Load MNIST data -------------------------------------------------------
+    # 1. Select dataset and augmentation ------------------------------------------------
 
-    augment = True
-    
-    # data_set = torchvision.datasets.MNIST
-        # data_set = torchvision.datasets.FashionMNIST
-    # (x_train, y_train), (x_val, y_val), (x_test, y_test) = ldd.load_torchvision_data_MNIST(data_set, augment=augment)
+    dataset_key = "CIFAR10"   # options: "cifar10", "mnist", "fashion_mnist"
+    model_choice = "resnet20"  # options: "resnet20", "simplecnn", "cnnflexi"
+    use_augment: Optional[bool] = None  # set to True/False to override dataset default
 
-    # Load datasets. The loader now returns Dataset/Subset objects (augment applied on-the-fly)
-    train_res, val_res, test_res = ldd.load_torchvision_data_cifar10(augment=augment)
+    bundle = ldd.load_dataset(dataset_key, augment=use_augment)
+    train_ds, val_ds, test_ds = bundle.train, bundle.val, bundle.test
 
-    from torch.utils.data import Dataset
-    if isinstance(train_res, Dataset):
-        train_ds = train_res
-        val_ds = val_res
-        test_ds = test_res
-    else:
-        # backward-compatible: loader returned tensors
-        (x_train, y_train), (x_val, y_val), (x_test, y_test) = (train_res, val_res, test_res)
-        train_ds = TensorDataset(x_train, y_train)
-        val_ds   = TensorDataset(x_val,   y_val)
-        test_ds  = TensorDataset(x_test,  y_test)
+    num_classes = len(bundle.class_names) if bundle.class_names is not None else 10
+    input_channels = bundle.num_channels
+    input_size = bundle.image_size
 
     train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, drop_last=False, num_workers=4)
     val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False, drop_last=False, num_workers=4)
@@ -290,30 +283,17 @@ if __name__ == "__main__":
 
     # 2. Create model ------------------------------------------------------------
 
-    # Determine input channels and spatial size from one training sample.
-    def _infer_input_shape(ds):
-        # ds can be a Dataset, Subset, or TensorDataset. Access index 0 to get (img, label)
-        sample = ds[0]
-        if isinstance(sample, (list, tuple)):
-            img = sample[0]
-        else:
-            img = sample
-        if not isinstance(img, torch.Tensor):
-            # try to convert (unlikely for torchvision datasets)
-            img = torch.as_tensor(img)
-        # If accidentally returned a batch, handle that
-        if img.ndim == 4 and img.shape[0] == 1:
-            img = img.squeeze(0)
-        if img.ndim != 3:
-            raise RuntimeError(f"Unexpected image tensor shape: {img.shape}")
-        C, H, W = img.shape
-        return C, H
-
-    input_channels, input_size = _infer_input_shape(train_ds)
-    
-    # model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=10).to(device)
-    # model = cnnflexi.SimpleCNNFlexi(input_channels=input_channels, input_size=input_size, num_classes=10).to(device)
-    model = rn.ResNet20(n_classes=10, use_projection=False)
+    if model_choice == "simplecnn":
+        model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=num_classes)
+    elif model_choice == "cnnflexi":
+        model = cnnflexi.SimpleCNNFlexi(input_channels=input_channels, input_size=input_size, num_classes=num_classes)
+        model.make_VGG()
+    elif model_choice == "resnet20":
+        if input_channels != 3:
+            raise ValueError("ResNet20 expects 3-channel inputs; choose a different model for this dataset.")
+        model = rn.ResNet20(n_classes=num_classes, use_projection=False)
+    else:
+        raise ValueError(f"Unknown model_choice '{model_choice}'.")
 
     model = model.to(device)
     # print(model)
@@ -358,12 +338,14 @@ if __name__ == "__main__":
 
     # scheduler = None
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+
     # Use the common ResNet/CIFAR step schedule: drop LR by 10 at epochs 80 and 120
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 120], gamma=0.1)
+
     # Alternative: cosine annealing
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-5)
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.2, total_steps=len(train_loader)*num_epochs,pct_start=0.3)
 
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.2, total_steps=len(train_loader)*num_epochs,pct_start=0.3)
 
     start_time = time.time()
 
@@ -372,27 +354,9 @@ if __name__ == "__main__":
     end_time = time.time()
     print(f"Training time for per epoch: {(end_time - start_time)/num_epochs:.2f} seconds")
 
-
     # 4. Test ----------------------------------------------------------------
 
     test_model(model, test_loader, device)
 
-
     # Plot training curves
     plot_training_curves(history_df)
-
-    # plot_predictions(model, test_loader, device)
-
-    # After training:
-    # cnnvis.show_conv1_kernels(model)
-    # cnnvis.show_kernel_frequency_response(model)
-    # cnnvis.print_kernels(model)
-
-    # xb, yb = next(iter(test_loader))
-    # cnnvis.show_conv1_feature_maps(model, xb[:1], device=device)
-
-    # cnnvis.show_conv_kernel(model.model.conv_block_1[0])  # Show kernels of first conv layer
-    # cnnvis.show_kernel_frequency_response(model.model.conv_block_1[0])  # Show freq response of first conv layer
-
-    # cnnvis.show_conv_kernel(model.model.conv_block_2[0])  # Show kernels of second conv layer
-    # cnnvis.show_kernel_frequency_response(model.model.conv_block_2[0])  # Show freq response of second conv layer
