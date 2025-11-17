@@ -91,9 +91,9 @@ class DownsampleOptionA(nn.Module):
         return x
 
 
-class ResNet20(nn.Module):
-    def __init__(self, n_classes, use_projection: bool = True):
-        super(ResNet20, self).__init__()
+class ResNet(nn.Module):
+    def __init__(self, n_classes, resnet_n = 3, use_projection: bool = True):
+        super(ResNet, self).__init__()
         
         # If True use 1x1 conv + BN projection for identity when downsampling
         # If False use option A (zero-pad + subsample) from the CIFAR ResNet paper
@@ -109,11 +109,16 @@ class ResNet20(nn.Module):
 
 
         # STAGE-1 using Residual Blocks
-        self.layer1 = nn.Sequential(
-            ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None),
-            ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None),
-            ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)
-        )
+        # self.layer1 = nn.Sequential(
+        #     ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)
+        #     # ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None),
+        #     # ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)
+        # )
+
+        # no downsampling in stage 1
+        self.layer1 = nn.Sequential()
+        for idx in range(resnet_n):
+            self.layer1.add_module(f"block{idx+1}", ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)) 
 
         # STAGE-2 using Residual Blocks
         if self.use_projection:
@@ -124,11 +129,15 @@ class ResNet20(nn.Module):
         else:
             ds = DownsampleOptionA(in_channels=16, out_channels=32, stride=2)
 
-        self.layer2 = nn.Sequential(
-            ResidualBlock(in_channels=16, out_channels=32, stride=2, downsample=ds),
-            ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None),
-            ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None),
-        )
+        # self.layer2 = nn.Sequential(
+        #     ResidualBlock(in_channels=16, out_channels=32, stride=2, downsample=ds)
+        #     # ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None),
+        #     # ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None),
+        # )
+        self.layer2 = nn.Sequential()
+        self.layer2.add_module("block1", ResidualBlock(in_channels=16, out_channels=32, stride=2, downsample=ds))
+        for _ in range(resnet_n - 1):
+            self.layer2.add_module(f"block{idx+1}", ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None)) 
 
 
         # STAGE-3 using Residual Blocks
@@ -140,11 +149,15 @@ class ResNet20(nn.Module):
         else:
             ds2 = DownsampleOptionA(in_channels=32, out_channels=64, stride=2)
 
-        self.layer3 = nn.Sequential(
-            ResidualBlock(in_channels=32, out_channels=64, stride=2, downsample=ds2),
-            ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None),
-            ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None),
-        )
+        # self.layer3 = nn.Sequential(
+        #     ResidualBlock(in_channels=32, out_channels=64, stride=2, downsample=ds2)
+        #     # ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None),
+        #     # ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None),
+        # )
+        self.layer3 = nn.Sequential()
+        self.layer3.add_module("block1", ResidualBlock(in_channels=32, out_channels=64, stride=2, downsample=ds2))
+        for _ in range(resnet_n - 1):
+            self.layer3.add_module(f"block{idx+1}", ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None)) 
 
        
         # FINAL BLOCK
@@ -165,7 +178,7 @@ class ResNet20(nn.Module):
                 if getattr(m, 'bias', None) is not None:
                     nn.init.zeros_(m.bias)
 
-        print("ResNet-20 Model Created")
+        print(f"ResNet-{6*resnet_n + 2} Model Created")
     
     def forward(self, x):
 
