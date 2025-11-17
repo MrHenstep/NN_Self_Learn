@@ -291,7 +291,7 @@ if __name__ == "__main__":
     elif model_choice == "resnet20":
         if input_channels != 3:
             raise ValueError("ResNet20 expects 3-channel inputs; choose a different model for this dataset.")
-        model = rn.ResNet20(n_classes=num_classes, use_projection=False)
+        model = rn.ResNet(n_classes=num_classes, resnet_n=3, use_projection=False)
     else:
         raise ValueError(f"Unknown model_choice '{model_choice}'.")
 
