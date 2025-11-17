@@ -33,7 +33,7 @@ class ResidualBlock(nn.Module):
         - ReLU is used with inplace=True in this implementation.
     """
 
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
+    def __init__(self, in_channels, out_channels, stride=1, downsample=None, use_residual=True):
 
         super(ResidualBlock, self).__init__()
 
@@ -44,6 +44,8 @@ class ResidualBlock(nn.Module):
         self.bn2 = nn.BatchNorm2d(out_channels)
         
         self.downsample = downsample
+
+        self.use_residual = use_residual
 
     def forward(self, x):
         identity = x
@@ -58,7 +60,8 @@ class ResidualBlock(nn.Module):
         if self.downsample is not None:
             identity = self.downsample(x)
 
-        out += identity
+        if self.use_residual:
+            out += identity
         out = self.relu(out)
 
         return out
@@ -92,7 +95,7 @@ class DownsampleOptionA(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, n_classes, resnet_n = 3, use_projection: bool = True):
+    def __init__(self, n_classes, resnet_n = 3, use_projection: bool = True, use_residual: bool = True):
         super(ResNet, self).__init__()
         
         # If True use 1x1 conv + BN projection for identity when downsampling
@@ -107,18 +110,10 @@ class ResNet(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=(3,3), stride=(1,1), padding=(1,1), bias=False)
         self.batchnorm1 = nn.BatchNorm2d(16)
 
-
-        # STAGE-1 using Residual Blocks
-        # self.layer1 = nn.Sequential(
-        #     ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)
-        #     # ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None),
-        #     # ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)
-        # )
-
-        # no downsampling in stage 1
+        # STAGE 1 - no downsampling
         self.layer1 = nn.Sequential()
         for idx in range(resnet_n):
-            self.layer1.add_module(f"block{idx+1}", ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None)) 
+            self.layer1.add_module(f"block{idx+1}", ResidualBlock(in_channels=16, out_channels=16, stride=1, downsample=None, use_residual=use_residual))
 
         # STAGE-2 using Residual Blocks
         if self.use_projection:
@@ -129,15 +124,10 @@ class ResNet(nn.Module):
         else:
             ds = DownsampleOptionA(in_channels=16, out_channels=32, stride=2)
 
-        # self.layer2 = nn.Sequential(
-        #     ResidualBlock(in_channels=16, out_channels=32, stride=2, downsample=ds)
-        #     # ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None),
-        #     # ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None),
-        # )
         self.layer2 = nn.Sequential()
-        self.layer2.add_module("block1", ResidualBlock(in_channels=16, out_channels=32, stride=2, downsample=ds))
-        for _ in range(resnet_n - 1):
-            self.layer2.add_module(f"block{idx+1}", ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None)) 
+        self.layer2.add_module("block1", ResidualBlock(in_channels=16, out_channels=32, stride=2, downsample=ds, use_residual=use_residual))
+        for idx in range(resnet_n - 1):
+            self.layer2.add_module(f"block{idx+2}", ResidualBlock(in_channels=32, out_channels=32, stride=1, downsample=None, use_residual=use_residual)) 
 
 
         # STAGE-3 using Residual Blocks
@@ -149,15 +139,10 @@ class ResNet(nn.Module):
         else:
             ds2 = DownsampleOptionA(in_channels=32, out_channels=64, stride=2)
 
-        # self.layer3 = nn.Sequential(
-        #     ResidualBlock(in_channels=32, out_channels=64, stride=2, downsample=ds2)
-        #     # ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None),
-        #     # ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None),
-        # )
         self.layer3 = nn.Sequential()
-        self.layer3.add_module("block1", ResidualBlock(in_channels=32, out_channels=64, stride=2, downsample=ds2))
-        for _ in range(resnet_n - 1):
-            self.layer3.add_module(f"block{idx+1}", ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None)) 
+        self.layer3.add_module("block1", ResidualBlock(in_channels=32, out_channels=64, stride=2, downsample=ds2, use_residual=use_residual))
+        for idx in range(resnet_n - 1):
+            self.layer3.add_module(f"block{idx+2}", ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None, use_residual=use_residual)) 
 
        
         # FINAL BLOCK

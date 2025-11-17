@@ -98,7 +98,9 @@ def train_epochs(model, train_loader, val_loader, criterion, optimizer, schedule
         train_err = 1.0 - train_acc
         val_err = 1.0 - val_acc
 
-        print(f"Epoch {epoch+1}: train_loss={train_loss:.4f} train_err={train_err:.4f} | val_loss={val_loss:.4f} val_err={val_err:.4f} | lr={lr:.6f} | time={time_elapsed:.2f}s")
+        if epoch == 0:
+            print(f"{'epoch':>5} {'train_loss':>10} {'train_err':>10} {'val_loss':>10} {'val_err':>10} {'lr':>10} {'time(s)':>8}")
+        print(f"{epoch+1:5d} {train_loss:10.4f} {train_err:10.4f} {val_loss:10.4f} {val_err:10.4f} {lr:10.6f} {time_elapsed:8.2f}")
 
         rows.append({
             'epoch': epoch+1,
@@ -254,8 +256,25 @@ def plot_training_curves(history_df):
 
 if __name__ == "__main__":
 
+    import subprocess
+
+    info = subprocess.check_output(
+        ["git", "show", "-s", "--format=%H%n%s"],
+        text=True
+    ).strip().splitlines()
+    # print(f"Commit: {info[0]}")
+    print(f"Commit Message: {info[1]}")
+    # print time and date
+    import datetime
+    now = datetime.datetime.now()
+    print("Start time:", now.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+    # Set random seed for reproducibility ----------------------------------------------------
+
     random_seed = 0
     torch.manual_seed(random_seed)
+
 
     # 0. pick GPU if available, else CPU ----------------------------------------------------
 
@@ -266,7 +285,8 @@ if __name__ == "__main__":
     # 1. Select dataset and augmentation ------------------------------------------------
 
     dataset_key = "CIFAR10"   # options: "cifar10", "mnist", "fashion_mnist"
-    model_choice = "resnet20"  # options: "resnet20", "simplecnn", "cnnflexi"
+    model_choice = "resnet"  # options: "resnet", "simplecnn", "cnnflexi"
+    resnet_n = 3 # for ResNet model
     use_augment: Optional[bool] = None  # set to True/False to override dataset default
 
     bundle = ldd.load_dataset(dataset_key, augment=use_augment)
@@ -288,15 +308,15 @@ if __name__ == "__main__":
     elif model_choice == "cnnflexi":
         model = cnnflexi.SimpleCNNFlexi(input_channels=input_channels, input_size=input_size, num_classes=num_classes)
         model.make_VGG()
-    elif model_choice == "resnet20":
+    elif model_choice == "resnet":
         if input_channels != 3:
-            raise ValueError("ResNet20 expects 3-channel inputs; choose a different model for this dataset.")
-        model = rn.ResNet(n_classes=num_classes, resnet_n=3, use_projection=False)
+            raise ValueError("ResNet expects 3-channel inputs; choose a different model for this dataset.")
+        model = rn.ResNet(n_classes=num_classes, resnet_n=resnet_n, use_projection=False, use_residual=True)
     else:
         raise ValueError(f"Unknown model_choice '{model_choice}'.")
 
     model = model.to(device)
-    # print(model)
+    print(model)
     
     # assert False, "Test stop"
 
