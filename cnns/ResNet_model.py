@@ -62,6 +62,7 @@ class ResidualBlock(nn.Module):
 
         if self.use_residual:
             out += identity
+
         out = self.relu(out)
 
         return out
@@ -94,21 +95,21 @@ class DownsampleOptionA(nn.Module):
         return x
 
 
-class ResNet(nn.Module):
+class ResNetCF(nn.Module):
     def __init__(self, n_classes, resnet_n = 3, use_projection: bool = True, use_residual: bool = True):
-        super(ResNet, self).__init__()
+        super(ResNetCF, self).__init__()
         
         # If True use 1x1 conv + BN projection for identity when downsampling
         # If False use option A (zero-pad + subsample) from the CIFAR ResNet paper
         self.use_projection = use_projection
 
-        self.dropout_percentage = 0.5
-        self.relu = nn.ReLU()
+        # self.dropout_percentage = 0.5
         
-        # STEM BLOCK
+        # CIFAR-10 STEM BLOCK
 
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=(3,3), stride=(1,1), padding=(1,1), bias=False)
         self.batchnorm1 = nn.BatchNorm2d(16)
+        self.relu = nn.ReLU()
 
         # STAGE 1 - no downsampling
         self.layer1 = nn.Sequential()
@@ -145,7 +146,7 @@ class ResNet(nn.Module):
             self.layer3.add_module(f"block{idx+2}", ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None, use_residual=use_residual)) 
 
        
-        # FINAL BLOCK
+        # CIFAR-10 FINAL BLOCK
         self.avgpool = nn.AdaptiveAvgPool2d((1,1))
         self.fc = nn.Linear(in_features=64, out_features=n_classes)
 
@@ -171,6 +172,105 @@ class ResNet(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)            # (N, 512)
+        x = self.fc(x)                     # (N, n_classes) logits; no ReLU/softmax here
+
+        return x
+
+class ResNetIN(nn.Module):
+
+    def __init__(self, n_classes, resnet_n = 3, use_projection: bool = True, use_residual: bool = True):
+        super(ResNetIN, self).__init__()
+        
+        # If True use 1x1 conv + BN projection for identity when downsampling
+        # If False use option A (zero-pad + subsample) from the CIFAR ResNet paper
+        self.use_projection = use_projection
+
+        # self.dropout_percentage = 0.5
+        self.relu = nn.ReLU()
+        
+        # # STEM BLOCK
+
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=(7,7), stride=(2,2), padding=(3,3), bias=False)
+        self.batchnorm1 = nn.BatchNorm2d(64)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        def proj(in_ch, out_ch, stride):
+            return nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_ch),
+            )
+
+        # STAGE 1 - no downsampling
+        self.layer1 = nn.Sequential()
+        for idx in range(3):
+            self.layer1.add_module(f"block{idx+1}", ResidualBlock(in_channels=64, out_channels=64, stride=1, downsample=None, use_residual=use_residual))
+
+        # STAGE-2 - downsampling
+        if self.use_projection:
+            ds = proj(64, 128, 2)
+        else:
+            ds = DownsampleOptionA(in_channels=64, out_channels=128, stride=2)
+
+        self.layer2 = nn.Sequential()
+        self.layer2.add_module("block1", ResidualBlock(in_channels=64, out_channels=128, stride=2, downsample=ds, use_residual=use_residual))
+        for idx in range(1, 4):
+            self.layer2.add_module(f"block{idx+1}", ResidualBlock(in_channels=128, out_channels=128, stride=1, downsample=None, use_residual=use_residual)) 
+
+
+        # STAGE-3 downsampling
+        if self.use_projection:
+            ds2 = proj(128, 256, 2)
+        else:
+            ds2 = DownsampleOptionA(in_channels=128, out_channels=256, stride=2)
+
+        self.layer3 = nn.Sequential()
+        self.layer3.add_module("block1", ResidualBlock(in_channels=128, out_channels=256, stride=2, downsample=ds2, use_residual=use_residual))
+        for idx in range(1, 6):
+            self.layer3.add_module(f"block{idx+1}", ResidualBlock(in_channels=256, out_channels=256, stride=1, downsample=None, use_residual=use_residual)) 
+
+
+        # STAGE-4 downsampling
+        if self.use_projection:
+            ds2 = proj(256, 512, 2)
+        else:
+            ds2 = DownsampleOptionA(in_channels=256, out_channels=512, stride=2)
+
+        self.layer4 = nn.Sequential()
+        self.layer4.add_module("block1", ResidualBlock(in_channels=256, out_channels=512, stride=2, downsample=ds2, use_residual=use_residual))
+        for idx in range(1, 3):
+            self.layer4.add_module(f"block{idx+1}", ResidualBlock(in_channels=512, out_channels=512, stride=1, downsample=None, use_residual=use_residual)) 
+
+              
+        # # FINAL BLOCK
+        self.avgpool = nn.AdaptiveAvgPool2d((1,1))
+        self.fc = nn.Linear(in_features=512, out_features=n_classes)
+
+        # Initialize weights (He / Kaiming for convs, sensible defaults for BN/Linear)
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if getattr(m, 'bias', None) is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                if getattr(m, 'bias', None) is not None:
+                    nn.init.zeros_(m.bias)
+
+        print(f"ResNet-{34} Model Created")
+    
+    def forward(self, x):
+
+        x = self.relu(self.batchnorm1(self.conv1(x)))
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
         x = self.avgpool(x)
         x = torch.flatten(x, 1)            # (N, 512)
         x = self.fc(x)                     # (N, n_classes) logits; no ReLU/softmax here

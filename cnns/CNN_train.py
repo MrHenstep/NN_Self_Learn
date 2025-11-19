@@ -262,8 +262,8 @@ if __name__ == "__main__":
         ["git", "show", "-s", "--format=%H%n%s"],
         text=True
     ).strip().splitlines()
-    # print(f"Commit: {info[0]}")
     print(f"Commit Message: {info[1]}")
+
     # print time and date
     import datetime
     now = datetime.datetime.now()
@@ -284,24 +284,50 @@ if __name__ == "__main__":
 
     # 1. Select dataset and augmentation ------------------------------------------------
 
-    dataset_key = "CIFAR10"   # options: "cifar10", "mnist", "fashion_mnist"
+    # ---- DATASET SELECTION ----
+    dataset_key = "oxford_pets"   # options: "oxford_pets", "imagenet", "cifar10", "mnist", "fashion_mnist"
     model_choice = "resnet"  # options: "resnet", "simplecnn", "cnnflexi"
-    resnet_n = 3 # for ResNet model
+    resnet_n = 3 # for CIFAR-style ResNet
     use_augment: Optional[bool] = None  # set to True/False to override dataset default
 
-    bundle = ldd.load_dataset(dataset_key, augment=use_augment)
-    train_ds, val_ds, test_ds = bundle.train, bundle.val, bundle.test
+    key_lower = dataset_key.lower()
 
-    num_classes = len(bundle.class_names) if bundle.class_names is not None else 10
-    input_channels = bundle.num_channels
-    input_size = bundle.image_size
+    if key_lower == "imagenet":
+        # You may need to adjust root to your ImageNet location
+        root = "./data/imagenet"
+        train_ds, val_ds, test_ds = ldd.load_torchvision_data_imagenet(root=root, augment=use_augment)
+        num_classes = 1000
+        input_channels = 3
+        input_size = 224
+        batch_size = 64
+        val_batch_size = 128
+        test_batch_size = 128
+    elif key_lower == "oxford_pets":
+        root = "./data/oxford-iiit-pet"
+        train_ds, val_ds, test_ds = ldd.load_torchvision_data_oxford_pets(root=root, augment=use_augment)
+        num_classes = 37
+        input_channels = 3
+        input_size = 224
+        batch_size = 64
+        val_batch_size = 128
+        test_batch_size = 128
+    else:
+        bundle = ldd.load_dataset(dataset_key, augment=use_augment)
+        train_ds, val_ds, test_ds = bundle.train, bundle.val, bundle.test
+        num_classes = len(bundle.class_names) if bundle.class_names is not None else 10
+        input_channels = bundle.num_channels
+        input_size = bundle.image_size
+        batch_size = 128
+        val_batch_size = 256
+        test_batch_size = 256
 
-    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, drop_last=False, num_workers=4)
-    val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False, drop_last=False, num_workers=4)
-    test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False, drop_last=False, num_workers=4)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=4)
+    val_loader   = DataLoader(val_ds,   batch_size=val_batch_size, shuffle=False, drop_last=False, num_workers=4)
+    test_loader  = DataLoader(test_ds,  batch_size=test_batch_size, shuffle=False, drop_last=False, num_workers=4)
 
 
     # 2. Create model ------------------------------------------------------------
+
 
     if model_choice == "simplecnn":
         model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=num_classes)
@@ -311,7 +337,10 @@ if __name__ == "__main__":
     elif model_choice == "resnet":
         if input_channels != 3:
             raise ValueError("ResNet expects 3-channel inputs; choose a different model for this dataset.")
-        model = rn.ResNet(n_classes=num_classes, resnet_n=resnet_n, use_projection=False, use_residual=True)
+        if key_lower in {"imagenet", "oxford_pets"}:
+            model = rn.ResNetIN(n_classes=num_classes, use_projection=True, use_residual=True)
+        else:
+            model = rn.ResNetCF(n_classes=num_classes, resnet_n=resnet_n, use_projection=False, use_residual=True)
     else:
         raise ValueError(f"Unknown model_choice '{model_choice}'.")
 
@@ -354,7 +383,7 @@ if __name__ == "__main__":
     ], lr=0.1, momentum=0.9)
     
 
-    num_epochs = 200
+    num_epochs = 100
 
     # scheduler = None
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)

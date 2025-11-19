@@ -18,7 +18,7 @@ train_ds, val_ds, test_ds = bundle.train, bundle.val, bundle.test
 train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, num_workers=4)
 val_loader   = DataLoader(val_ds,   batch_size=256, shuffle=False, num_workers=4)
 
-model = rn.ResNet(n_classes=10, use_projection=False).to(device)
+model = rn.ResNetCF(n_classes=10, use_projection=False).to(device)
 criterion = torch.nn.CrossEntropyLoss()
 # Exclude BatchNorm params and biases from weight decay
 decay_params = []
