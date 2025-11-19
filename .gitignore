@@ -5,3 +5,5 @@ how_to_commit.txt
 
 *.cpython-*.json
 __pycache__/
+
+/xdata

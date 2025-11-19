@@ -1,5 +1,6 @@
 import importlib
 import sys
+import os
 from pathlib import Path
 import time
 from typing import Optional
@@ -52,6 +53,8 @@ def train_epochs(model, train_loader, val_loader, criterion, optimizer, schedule
 
     for epoch in range(num_epochs):
 
+
+
         model.train()
         running_loss, running_acc, n = 0.0, 0.0, 0
         time_start = time.time()
@@ -72,7 +75,7 @@ def train_epochs(model, train_loader, val_loader, criterion, optimizer, schedule
 
         if scheduler is not None:
             scheduler.step()
-
+            
         train_loss = running_loss / n
         train_acc  = running_acc / n
 
@@ -229,7 +232,7 @@ def plot_training_curves(history_df):
     plt.plot(epochs, tl, label='Train Loss')
     plt.plot(epochs, vl, label='Val Loss')
     if lr is not None:
-        plt.plot(epochs, lr * (lr.max() / lr.max()), label='Learning Rate', linestyle='--')
+        plt.plot(epochs, lr * (tl.max() / lr.max()), label='Learning Rate', linestyle='--')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')
@@ -241,6 +244,8 @@ def plot_training_curves(history_df):
     if te is not None and ve is not None:
         plt.plot(epochs, te, label='Train Error')
         plt.plot(epochs, ve, label='Val Error')
+        if lr is not None:
+            plt.plot(epochs, lr * (te.max() / lr.max()), label='Learning Rate', linestyle='--')
         plt.xlabel('Epoch')
         plt.ylabel('Error')
         plt.title('Training and Validation Error')
@@ -252,6 +257,30 @@ def plot_training_curves(history_df):
         plt.title('Training and Validation Accuracy')
     plt.legend()
     plt.show()
+
+def make_param_groups(model):
+    """Return (decay_params, no_decay_params, bn_param_ids) for optimizer construction."""
+    decay_params = []
+    no_decay_params = []
+    bn_param_ids = set()
+
+    for module in model.modules():
+        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            for p in module.parameters():
+                bn_param_ids.add(id(p))
+
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if id(p) in bn_param_ids or name.endswith('.bias'):
+            no_decay_params.append(p)
+        else:
+            decay_params.append(p)
+
+    print(f"Optimizer params: decay={len(decay_params)} no_decay={len(no_decay_params)} (bn_params={len(bn_param_ids)})")
+
+    return decay_params, no_decay_params, bn_param_ids
+
 #########################################################################################
 
 if __name__ == "__main__":
@@ -285,9 +314,9 @@ if __name__ == "__main__":
     # 1. Select dataset and augmentation ------------------------------------------------
 
     # ---- DATASET SELECTION ----
-    dataset_key = "oxford_pets"   # options: "oxford_pets", "imagenet", "cifar10", "mnist", "fashion_mnist"
-    model_choice = "resnet"  # options: "resnet", "simplecnn", "cnnflexi"
-    resnet_n = 3 # for CIFAR-style ResNet
+
+    dataset_key = "tiny_imagenet"   # options: "tiny_imagenet", "oxford_pets", "imagenet", "cifar10", "mnist", "fashion_mnist"
+    
     use_augment: Optional[bool] = None  # set to True/False to override dataset default
 
     key_lower = dataset_key.lower()
@@ -302,6 +331,15 @@ if __name__ == "__main__":
         batch_size = 64
         val_batch_size = 128
         test_batch_size = 128
+    elif key_lower == "tiny_imagenet":
+        root = "./data"
+        train_ds, val_ds, test_ds = ldd.load_torchvision_data_tiny_imagenet(root=root, augment=use_augment)
+        num_classes = 200
+        input_channels = 3
+        input_size = 64
+        batch_size = 256
+        val_batch_size = 256
+        test_batch_size = 256
     elif key_lower == "oxford_pets":
         root = "./data/oxford-iiit-pet"
         train_ds, val_ds, test_ds = ldd.load_torchvision_data_oxford_pets(root=root, augment=use_augment)
@@ -321,13 +359,18 @@ if __name__ == "__main__":
         val_batch_size = 256
         test_batch_size = 256
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=4)
-    val_loader   = DataLoader(val_ds,   batch_size=val_batch_size, shuffle=False, drop_last=False, num_workers=4)
-    test_loader  = DataLoader(test_ds,  batch_size=test_batch_size, shuffle=False, drop_last=False, num_workers=4)
+    num_workers = (os.cpu_count() or 4) // 2
+    print(f"Using {num_workers} data loader workers.")
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=(device.type == 'cuda'), persistent_workers=True, prefetch_factor=4)
+    val_loader   = DataLoader(val_ds,   batch_size=val_batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=(device.type == 'cuda'), persistent_workers=True, prefetch_factor=4)
+    test_loader  = DataLoader(test_ds,  batch_size=test_batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=(device.type == 'cuda'), persistent_workers=True, prefetch_factor=4)
 
 
     # 2. Create model ------------------------------------------------------------
 
+    model_choice = "resnet"  # options: "resnet", "simplecnn", "cnnflexi"
+    resnet_n = 3 # for CIFAR-style ResNet
 
     if model_choice == "simplecnn":
         model = cnnmodel.SimpleCNN(input_size=input_size, num_classes=num_classes)
@@ -337,7 +380,7 @@ if __name__ == "__main__":
     elif model_choice == "resnet":
         if input_channels != 3:
             raise ValueError("ResNet expects 3-channel inputs; choose a different model for this dataset.")
-        if key_lower in {"imagenet", "oxford_pets"}:
+        if key_lower in {"imagenet", "oxford_pets", "tiny_imagenet"}:
             model = rn.ResNetIN(n_classes=num_classes, use_projection=True, use_residual=True)
         else:
             model = rn.ResNetCF(n_classes=num_classes, resnet_n=resnet_n, use_projection=False, use_residual=True)
@@ -351,50 +394,43 @@ if __name__ == "__main__":
 
     # 3. Train ---------------------------------------------------------------
 
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # Build optimizer with two param groups: apply weight decay to weights, but
     # exclude BatchNorm parameters and biases from weight decay (common best-practice).
     # Build optimizer param groups by module type to reliably exclude BatchNorm
     # parameters and all biases from weight decay.
-    decay_params = []
-    no_decay_params = []
 
-    # Collect ids of BatchNorm parameters
-    bn_param_ids = set()
-    for module in model.modules():
-        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
-            for p in module.parameters():
-                bn_param_ids.add(id(p))
-
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
-            continue
-        if id(p) in bn_param_ids or name.endswith('.bias'):
-            no_decay_params.append(p)
-        else:
-            decay_params.append(p)
-
-    print(f"Optimizer params: decay={len(decay_params)} no_decay={len(no_decay_params)} (bn_params={len(bn_param_ids)})")
+    decay_params, no_decay_params, bn_param_ids = make_param_groups(model)
 
     optimizer = torch.optim.SGD([
-        {'params': decay_params, 'weight_decay': 1e-4},
+        {'params': decay_params, 'weight_decay': 3e-4},
         {'params': no_decay_params, 'weight_decay': 0.0}
-    ], lr=0.1, momentum=0.9)
+    ], lr=0.1, momentum=0.9, nesterov=False)
     
 
-    num_epochs = 100
+    num_epochs = 200
 
+    warmup_epochs = 5
+    min_lr = 1e-3
+    base_lr = optimizer.param_groups[0]['lr']
+    def _lr_lambda(e):
+        if e < warmup_epochs:
+            return (e + 1) / warmup_epochs
+        progress = (e - warmup_epochs) / (num_epochs - warmup_epochs)
+        cosine_term = 0.5 * (1 + np.cos(np.pi * progress))
+        scaled_lr = min_lr / base_lr
+        return max(cosine_term, scaled_lr)
+    
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_lr_lambda)
+    
     # scheduler = None
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-
-    # Use the common ResNet/CIFAR step schedule: drop LR by 10 at epochs 80 and 120
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 120], gamma=0.1)
-
-    # Alternative: cosine annealing
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20, 40], gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-5)
-
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.2, total_steps=len(train_loader)*num_epochs,pct_start=0.3)
+
+
 
     start_time = time.time()
 

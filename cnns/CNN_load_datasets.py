@@ -6,8 +6,10 @@ from typing import Callable, Dict, Optional, Sequence
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets, transforms
+from torchvision.datasets.folder import default_loader
 from collections import defaultdict
 import random
+import os
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,28 @@ def _oxford_pets_eval_transform(mean: torch.Tensor, std: torch.Tensor) -> transf
     ])
 
 
+def _tiny_imagenet_train_augment(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
+    mean_list = mean.tolist()
+    std_list = std.tolist()
+    return transforms.Compose([
+        transforms.RandomResizedCrop(64, scale=(0.6, 1.0), ratio=(0.75, 1.33)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+        transforms.ToTensor(),
+        transforms.Normalize(mean_list, std_list),
+        transforms.RandomErasing(p=0.5, scale=(0.02, 0.2), ratio=(0.3, 3.3), value="random"),
+    ])
+
+
+def _tiny_imagenet_eval_transform(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
+    mean_list = mean.tolist()
+    std_list = std.tolist()
+    return transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean_list, std_list),
+    ])
+
+
 _DATASET_REGISTRY: Dict[str, DatasetConfig] = {
     "mnist": DatasetConfig(
         key="mnist",
@@ -133,6 +157,14 @@ _DATASET_REGISTRY: Dict[str, DatasetConfig] = {
         augment_builder=None,
         default_augment=True,
         display_name="Oxford-IIIT Pets",
+    ),
+    "tiny_imagenet": DatasetConfig(
+        key="tiny_imagenet",
+        dataset_cls=None,  # handled separately
+        default_val_split=0,
+        augment_builder=None,
+        default_augment=True,
+        display_name="Tiny ImageNet",
     ),
     "imagenet": DatasetConfig(
         key="imagenet",
@@ -383,6 +415,78 @@ def _load_oxford_pets(
     )
 
 
+def _parse_tiny_imagenet_val_annotations(val_dir: str) -> dict[str, str]:
+    annotations_path = os.path.join(val_dir, "val_annotations.txt")
+    mapping: dict[str, str] = {}
+    with open(annotations_path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                filename, wnid = parts[0], parts[1]
+                mapping[filename] = wnid
+    return mapping
+
+
+class TinyImageNetDataset(Dataset):
+    def __init__(
+        self,
+        samples: list[tuple[str, int]],
+        classes: Sequence[str],
+        transform: Optional[Callable] = None,
+        loader=default_loader,
+    ):
+        self.samples = samples
+        self.transform = transform
+        self.loader = loader
+        self.classes = list(classes)
+        self.targets = [target for _, target in samples]
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int):
+        path, target = self.samples[index]
+        image = self.loader(path)
+        if self.transform is not None:
+            image = self.transform(image)
+        return image, target
+
+
+def _gather_tiny_imagenet_samples(root: str) -> tuple[list[tuple[str, int]], list[tuple[str, int]], dict[str, int], list[str]]:
+    train_dir = os.path.join(root, "train")
+    if not os.path.isdir(train_dir):
+        raise RuntimeError(f"Tiny ImageNet train directory not found at '{train_dir}'.")
+
+    class_names = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+    class_to_idx = {cls_name: idx for idx, cls_name in enumerate(class_names)}
+
+    train_samples: list[tuple[str, int]] = []
+    for cls_name, cls_idx in class_to_idx.items():
+        cls_images = os.path.join(train_dir, cls_name, "images")
+        if not os.path.isdir(cls_images):
+            continue
+        for fname in os.listdir(cls_images):
+            if fname.lower().endswith((".jpeg", ".jpg", ".png")):
+                train_samples.append((os.path.join(cls_images, fname), cls_idx))
+
+    val_dir = os.path.join(root, "val")
+    if not os.path.isdir(val_dir):
+        raise RuntimeError(f"Tiny ImageNet val directory not found at '{val_dir}'.")
+    mapping = _parse_tiny_imagenet_val_annotations(val_dir)
+    val_images_dir = os.path.join(val_dir, "images")
+    val_samples: list[tuple[str, int]] = []
+    for fname, wnid in mapping.items():
+        cls_idx = class_to_idx.get(wnid)
+        if cls_idx is None:
+            continue
+        path = os.path.join(val_images_dir, fname)
+        if os.path.isfile(path):
+            val_samples.append((path, cls_idx))
+
+    classes = sorted(class_to_idx, key=class_to_idx.get)
+    return train_samples, val_samples, class_to_idx, classes
+
+
 def _load_imagenet(
     config: DatasetConfig,
     *,
@@ -452,6 +556,62 @@ def _load_imagenet(
     )
 
 
+def _load_tiny_imagenet(
+    *,
+    root: str,
+    val_split: Optional[int],
+    augment: Optional[bool],
+    download: bool,
+    verbose: bool,
+) -> DatasetBundle:
+    if download:
+        if verbose:
+            print("Automatic download for Tiny ImageNet is not supported. Ensure data is extracted under 'tiny-imagenet-200/'.")
+
+    train_samples, val_samples, class_to_idx, classes = _gather_tiny_imagenet_samples(root)
+
+    stats_dataset = TinyImageNetDataset(train_samples, classes, transform=transforms.ToTensor())
+    mean, std = _compute_mean_std_from_dataset(stats_dataset, batch_size=256)
+
+    use_augment = True if augment is None else augment
+    train_transform = _tiny_imagenet_train_augment(mean, std) if use_augment else _tiny_imagenet_eval_transform(mean, std)
+    eval_transform = _tiny_imagenet_eval_transform(mean, std)
+
+    train_dataset = TinyImageNetDataset(train_samples, classes, transform=train_transform)
+    eval_dataset = TinyImageNetDataset(val_samples, classes, transform=eval_transform)
+
+    total_val = len(val_samples)
+    split = total_val // 2 if val_split is None else val_split
+    if split <= 0 or split >= total_val:
+        raise ValueError(f"val_split must be in (0, {total_val}), got {split}")
+
+    rng = random.Random(0)
+    indices = list(range(total_val))
+    rng.shuffle(indices)
+    val_indices = indices[:split]
+    test_indices = indices[split:]
+
+    val_subset = Subset(eval_dataset, val_indices)
+    test_subset = Subset(eval_dataset, test_indices)
+
+    if verbose:
+        print("Tiny ImageNet stats:")
+        print(f"  mean={mean.tolist()} std={std.tolist()}")
+        print(f"  train samples={len(train_dataset)} val samples={len(val_subset)} test samples={len(test_subset)}")
+
+    mean_image_size = 64  # known constant
+    return DatasetBundle(
+        train=train_dataset,
+        val=val_subset,
+        test=test_subset,
+        mean=mean,
+        std=std,
+        image_size=mean_image_size,
+        num_channels=3,
+        class_names=classes,
+    )
+
+
 def load_dataset(
     name: str,
     *,
@@ -480,6 +640,15 @@ def load_dataset(
         return _load_imagenet(
             config,
             root=root,
+            val_split=val_split,
+            augment=augment,
+            download=download,
+            verbose=verbose,
+        )
+    if key == "tiny_imagenet":
+        tiny_root = os.path.join(root, "tiny-imagenet-200") if os.path.isdir(os.path.join(root, "tiny-imagenet-200")) else root
+        return _load_tiny_imagenet(
+            root=tiny_root,
             val_split=val_split,
             augment=augment,
             download=download,
@@ -579,6 +748,24 @@ def load_torchvision_data_imagenet(
         val_split=val_split,
         augment=augment,
         download=False,
+        verbose=verbose,
+    )
+    return bundle.train, bundle.val, bundle.test
+
+
+def load_torchvision_data_tiny_imagenet(
+    root: str = "./data",
+    val_split: Optional[int] = None,
+    augment: bool = True,
+    download: bool = False,
+    verbose: bool = True,
+):
+    bundle = load_dataset(
+        "tiny_imagenet",
+        root=root,
+        val_split=val_split,
+        augment=augment,
+        download=download,
         verbose=verbose,
     )
     return bundle.train, bundle.val, bundle.test
