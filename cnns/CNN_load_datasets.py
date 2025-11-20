@@ -107,7 +107,8 @@ def _tiny_imagenet_train_augment(mean: torch.Tensor, std: torch.Tensor) -> trans
     mean_list = mean.tolist()
     std_list = std.tolist()
     return transforms.Compose([
-        transforms.RandomResizedCrop(64, scale=(0.6, 1.0), ratio=(0.75, 1.33)),
+        transforms.RandomResizedCrop(64, scale=(0.55, 1.0), ratio=(0.75, 1.33)),
+        transforms.RandAugment(num_ops=2, magnitude=10),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
         transforms.ToTensor(),

@@ -8,6 +8,7 @@ from typing import Optional
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.optim.swa_utils import AveragedModel
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -33,7 +34,18 @@ else:
 
 #########################################################################################
 
-def train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs: int = 5):
+def _mixup_batch(inputs, targets, alpha: float):
+    if alpha <= 0.0:
+        return inputs, targets, targets, 1.0
+
+    lam = np.random.beta(alpha, alpha)
+    index = torch.randperm(inputs.size(0), device=inputs.device)
+    mixed_inputs = lam * inputs + (1.0 - lam) * inputs[index]
+    targets_a, targets_b = targets, targets[index]
+    return mixed_inputs, targets_a, targets_b, float(lam)
+
+
+def train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs: int = 5, mixup_alpha: Optional[float] = None, ema_model: Optional[torch.nn.Module] = None):
     """Train for `num_epochs` and return a pandas DataFrame with per-epoch metrics.
 
     Args:
@@ -45,16 +57,16 @@ def train_epochs(model, train_loader, val_loader, criterion, optimizer, schedule
         scheduler: learning rate scheduler (or None)
         device: torch.device
         num_epochs: number of epochs to run
+        mixup_alpha: MixUp Beta distribution parameter (if None/<=0, MixUp disabled)
+        ema_model: optional AveragedModel used for exponential moving average evaluation
 
     Returned DataFrame columns: ['epoch','train_loss','train_acc','val_loss','val_acc',
     'train_err','val_err','learning_rate','time_elapsed']
     """
     rows = []
+    use_mixup = mixup_alpha is not None and mixup_alpha > 0.0
 
     for epoch in range(num_epochs):
-
-
-
         model.train()
         running_loss, running_acc, n = 0.0, 0.0, 0
         time_start = time.time()
@@ -63,32 +75,46 @@ def train_epochs(model, train_loader, val_loader, criterion, optimizer, schedule
             xb, yb = xb.to(device), yb.to(device)
 
             optimizer.zero_grad(set_to_none=True)
-            logits = model(xb)
-            loss = criterion(logits, yb)
+            if use_mixup:
+                xb, targets_a, targets_b, lam = _mixup_batch(xb, yb, mixup_alpha)
+                logits = model(xb)
+                loss_vec = lam * criterion(logits, targets_a) + (1.0 - lam) * criterion(logits, targets_b)
+                preds = logits.argmax(1)
+                # MixUp accuracy is the weighted agreement with both constituent labels
+                batch_acc = lam * (preds == targets_a).float() + (1.0 - lam) * (preds == targets_b).float()
+                running_acc += batch_acc.sum().item()
+            else:
+                logits = model(xb)
+                loss_vec = criterion(logits, yb)
+                preds = logits.argmax(1)
+                running_acc += (preds == yb).sum().item()
+
+            loss = loss_vec.mean()
             loss.backward()
             optimizer.step()
+            if ema_model is not None:
+                ema_model.update_parameters(model)
 
             bs = xb.size(0)
-            running_loss += loss.item() * bs
-            running_acc  += (logits.argmax(1) == yb).sum().item()
+            running_loss += loss_vec.sum().item()
             n += bs
 
-        if scheduler is not None:
-            scheduler.step()
-            
         train_loss = running_loss / n
         train_acc  = running_acc / n
 
         # --- Validate ---
         model.eval()
+        eval_model = ema_model if ema_model is not None else model
+        eval_model.eval()
         val_loss, val_acc, n_val = 0.0, 0.0, 0
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
-                logits = model(xb)
-                loss = criterion(logits, yb)
+                logits = eval_model(xb)
+                loss_vec = criterion(logits, yb)
+                loss = loss_vec.mean()
                 bs = xb.size(0)
-                val_loss += loss.item() * bs
+                val_loss += loss_vec.sum().item()
                 val_acc  += (logits.argmax(1) == yb).sum().item()
                 n_val += bs
         val_loss /= n_val
@@ -116,6 +142,9 @@ def train_epochs(model, train_loader, val_loader, criterion, optimizer, schedule
             'learning_rate': lr,
             'time_elapsed': time_elapsed,
         })
+
+        if scheduler is not None:
+            scheduler.step()
 
     history_df = pd.DataFrame(rows)
     return history_df
@@ -232,7 +261,7 @@ def plot_training_curves(history_df):
     plt.plot(epochs, tl, label='Train Loss')
     plt.plot(epochs, vl, label='Val Loss')
     if lr is not None:
-        plt.plot(epochs, lr * (tl.max() / lr.max()), label='Learning Rate', linestyle='--')
+        plt.plot(epochs, lr, label='Learning Rate', linestyle='--')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Training and Validation Loss')
@@ -245,7 +274,7 @@ def plot_training_curves(history_df):
         plt.plot(epochs, te, label='Train Error')
         plt.plot(epochs, ve, label='Val Error')
         if lr is not None:
-            plt.plot(epochs, lr * (te.max() / lr.max()), label='Learning Rate', linestyle='--')
+            plt.plot(epochs, lr, label='Learning Rate', linestyle='--')
         plt.xlabel('Epoch')
         plt.ylabel('Error')
         plt.title('Training and Validation Error')
@@ -394,7 +423,8 @@ if __name__ == "__main__":
 
     # 3. Train ---------------------------------------------------------------
 
-    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+    mixup_alpha = 0.2
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.05, reduction='none')
 
     # Build optimizer with two param groups: apply weight decay to weights, but
     # exclude BatchNorm parameters and biases from weight decay (common best-practice).
@@ -404,14 +434,14 @@ if __name__ == "__main__":
     decay_params, no_decay_params, bn_param_ids = make_param_groups(model)
 
     optimizer = torch.optim.SGD([
-        {'params': decay_params, 'weight_decay': 3e-4},
+        {'params': decay_params, 'weight_decay': 1e-3},
         {'params': no_decay_params, 'weight_decay': 0.0}
     ], lr=0.1, momentum=0.9, nesterov=False)
     
 
     num_epochs = 200
 
-    warmup_epochs = 5
+    warmup_epochs = 7
     min_lr = 1e-3
     base_lr = optimizer.param_groups[0]['lr']
     def _lr_lambda(e):
@@ -423,6 +453,19 @@ if __name__ == "__main__":
         return max(cosine_term, scaled_lr)
     
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_lr_lambda)
+
+    ema_decay = 0.99
+
+    def _ema_avg_fn(averaged_model_parameter, model_parameter, num_averaged):
+        if num_averaged == 0:
+            return model_parameter
+        return ema_decay * averaged_model_parameter + (1.0 - ema_decay) * model_parameter
+
+    ema_model = AveragedModel(model, avg_fn=_ema_avg_fn)
+    ema_model.to(device)
+    ema_model.eval()
+    for param in ema_model.parameters():
+        param.requires_grad_(False)
     
     # scheduler = None
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
@@ -434,14 +477,26 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
-    history_df = train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs=num_epochs)
+    history_df = train_epochs(
+        model,
+        train_loader,
+        val_loader,
+        criterion,
+        optimizer,
+        scheduler,
+        device,
+        num_epochs=num_epochs,
+        mixup_alpha=mixup_alpha,
+        ema_model=ema_model,
+    )
 
     end_time = time.time()
     print(f"Training time for per epoch: {(end_time - start_time)/num_epochs:.2f} seconds")
 
     # 4. Test ----------------------------------------------------------------
 
-    test_model(model, test_loader, device)
+    eval_model = ema_model if ema_model is not None else model
+    test_model(eval_model, test_loader, device)
 
     # Plot training curves
     plot_training_curves(history_df)
