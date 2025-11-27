@@ -1,8 +1,8 @@
 import time
 import torch
 from torch.utils.data import DataLoader
-from cnns import CNN_load_datasets as ldd
-from cnns import ResNet_model as rn
+from cnn import CNN_load_datasets as ldd
+from cnn import ResNet_model as rn
 
 # Quick short training run to verify on-the-fly augmentation
 random_seed = 0
@@ -41,7 +41,7 @@ optimizer = torch.optim.SGD([
 # short schedule for quick test
 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[1], gamma=0.1)
 
-from cnns.CNN_train import train_epochs
+from cnn.CNN_train import train_epochs
 
 start = time.time()
 history = train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs=2)
@@ -51,7 +51,7 @@ print(history)
 print('Elapsed total:', end - start)
 
 # Run a quick validation test accuracy
-from cnns.CNN_train import test_model
+from cnn.CNN_train import test_model
 
 test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=4)
 print('Running test...')

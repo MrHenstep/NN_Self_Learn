@@ -1,23 +1,40 @@
 import time
 import torch
-from .configs import DataConfig, ModelConfig, TrainConfig
-from .data_loading import build_dataloaders
-from .model_factory import build_model
-from .optimizers import build_optimizer, build_scheduler, build_ema
-from .training_loop import train_epochs, test_model
-from .visualization import plot_training_curves
+import sys
+
+from .config import ModelConfig, TrainConfig, DataMetadata
+# from data_loading.loaders import build_dataloaders
+from .architectures.factory import build_model
+from .utils.optimization import build_optimizer, build_scheduler, build_ema
+from .trainer import train_epochs, test_model
+from .utils.visualization import plot_training_curves
+from torch.utils.data import DataLoader
 
 
-def run_training(data_cfg: DataConfig, model_cfg: ModelConfig, train_cfg: TrainConfig, device: torch.device):
-    train_loader, val_loader, test_loader, data_meta = build_dataloaders(data_cfg, device)
+def run_training(
+    model_cfg: ModelConfig, 
+    train_cfg: TrainConfig, 
+    device: torch.device,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    test_loader: DataLoader,
+    data_meta: DataMetadata
+):
+    
+    # print("Building dataloaders...")
+    # train_loader, val_loader, test_loader, data_meta = build_dataloaders(data_cfg, device)
+
+    print("Building model...")
     model = build_model(model_cfg, data_meta).to(device)
     print(model)
 
+    print("Setting up training components...")
     criterion = torch.nn.CrossEntropyLoss(label_smoothing=train_cfg.label_smoothing, reduction='none')
     optimizer = build_optimizer(model, train_cfg)
     scheduler = build_scheduler(optimizer, train_cfg)
     ema_model = build_ema(model, train_cfg, device)
 
+    print("Starting training...")
     start_time = time.time()
     history_df = train_epochs(
         model=model,
@@ -36,10 +53,12 @@ def run_training(data_cfg: DataConfig, model_cfg: ModelConfig, train_cfg: TrainC
     print(f"Training time per epoch: {epoch_time:.2f} seconds")
 
     if train_cfg.test_after_training:
+        print("Testing model after training...")
         eval_model = ema_model if ema_model is not None else model
         test_model(eval_model, test_loader, device)
 
     if train_cfg.plot_curves:
+        print("Plotting training curves...")
         plot_training_curves(history_df)
 
     return history_df, model, ema_model

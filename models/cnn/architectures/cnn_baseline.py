@@ -11,19 +11,19 @@ class SimpleCNN(nn.Module):
     Conv(1→8, 3×3, stride=1, padding=0) → ReLU → MaxPool(2×2) → Flatten → Linear(8·13·13 → 10)
     For MNIST (N, 1, 28, 28) → (N, 10)
     """
-    def __init__(self, input_size, num_classes: int = 10):
+    def __init__(self, input_size, num_classes: int = 10, input_channels: int = 1):
         
         super().__init__()
 
         feature_size = input_size  # 28 for MNIST
-        num_channels = 1
+        num_channels = input_channels
 
 
         # BLOCK 1
         num_channels_1, kernel_size_1, stride_1, padding_1 = 32, 3, 1, 1
         pool_kernel_size, pool_stride = 2, 2
 
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=num_channels_1, kernel_size=kernel_size_1, stride=stride_1, padding=padding_1)
+        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=num_channels_1, kernel_size=kernel_size_1, stride=stride_1, padding=padding_1)
         self.pool  = nn.MaxPool2d(kernel_size=pool_kernel_size, stride=pool_stride)
 
         print("Num channels, feature size at start:", num_channels, feature_size)

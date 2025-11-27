@@ -4,15 +4,15 @@ import subprocess
 import datetime
 import torch
 
-if __package__:
-    from .configs import DataConfig, ModelConfig, TrainConfig
-    from .run_training import run_training
-else:
-    _ROOT = Path(__file__).resolve().parent.parent
-    if str(_ROOT) not in sys.path:
-        sys.path.insert(0, str(_ROOT))
-    from cnns.configs import DataConfig, ModelConfig, TrainConfig
-    from cnns.run_training import run_training
+# Add project root to sys.path
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from models.cnn.config import DataConfig, ModelConfig, TrainConfig
+from models.cnn.engine import run_training
+from data_loading.loaders import build_dataloaders
+
 
 #########################################################################################
 
@@ -27,7 +27,7 @@ if __name__ == "__main__":
         print("Commit info unavailable.")
 
     now = datetime.datetime.now()
-    print("Start time:", now.strftime("%Y-%m-%d %H:%M:%S"))
+    print("Start time:", now.strftime("%Y-%m-%d %H:%M:%S")) 
 
     # Reproducibility
     torch.manual_seed(0)
@@ -57,4 +57,15 @@ if __name__ == "__main__":
         test_after_training=True,
     )
 
-    history_df, model, ema_model = run_training(data_cfg, model_cfg, train_cfg, device)
+    print("Building dataloaders...")
+    train_loader, val_loader, test_loader, data_meta = build_dataloaders(data_cfg, device)
+
+    history_df, model, ema_model = run_training(
+        model_cfg, 
+        train_cfg, 
+        device,
+        train_loader,
+        val_loader,
+        test_loader,
+        data_meta
+    )

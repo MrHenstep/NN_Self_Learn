@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 import pandas as pd
 
-from .augment_mixup import mixup_batch
+from data_loading.augmentation import mixup_batch
 
 
 def train_epochs(model, train_loader, val_loader, criterion, optimizer, scheduler, device, num_epochs: int = 5, mixup_alpha: Optional[float] = None, ema_model: Optional[torch.nn.Module] = None):

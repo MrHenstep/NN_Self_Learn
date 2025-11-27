@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch.optim.swa_utils import AveragedModel
-from .configs import TrainConfig
+from ..config import TrainConfig
 
 
 def make_param_groups(model):

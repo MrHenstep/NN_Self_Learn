@@ -3,9 +3,17 @@
 # by training on iris data and plotting. 
 ########################################################################
 
+import sys
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from . import perceptron as ptron
+
+# Add project root to sys.path
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from models.perceptron import perceptron as ptron
 
 from sklearn import datasets
 from sklearn.model_selection import train_test_split

@@ -3,32 +3,43 @@ from typing import Tuple
 import torch
 from torch.utils.data import DataLoader
 
-from .configs import DataConfig, DataMetadata
-from . import CNN_load_datasets as ldd
+from models.cnn.config import DataConfig, DataMetadata
+from . import datasets as ldd
 
+# print("Sys.path at start of loaders.py:", os.sys.path)
+# print("__package__ in loaders.py:", __package__)
 
 def build_dataloaders(data_cfg: DataConfig, device: torch.device) -> Tuple[DataLoader, DataLoader, DataLoader, DataMetadata]:
     key_lower = data_cfg.dataset_key.lower()
 
     if key_lower == "imagenet":
-        root = data_cfg.root or "./data/imagenet"
+        root = data_cfg.root or "data/imagenet"
+
+        print(f"Loading ImageNet data from {root} with augment={data_cfg.use_augment}")
         train_ds, val_ds, test_ds = ldd.load_torchvision_data_imagenet(root=root, augment=data_cfg.use_augment)
+        
         num_classes = 1000
         input_channels = 3
         input_size = 224
         default_batch = 64
         default_eval_batch = 128
     elif key_lower == "tiny_imagenet":
-        root = data_cfg.root or "./data"
+        root = data_cfg.root or "data"
+        
+        print(f"Loading Tiny ImageNet data from {root} with augment={data_cfg.use_augment}")
         train_ds, val_ds, test_ds = ldd.load_torchvision_data_tiny_imagenet(root=root, augment=data_cfg.use_augment)
+
         num_classes = 200
         input_channels = 3
         input_size = 64
         default_batch = 256
         default_eval_batch = 256
     elif key_lower == "oxford_pets":
-        root = data_cfg.root or "./data/oxford-iiit-pet"
+        root = data_cfg.root or "data/oxford-iiit-pet"
+                
+        print(f"Loading Oxford Pets data from {root} with augment={data_cfg.use_augment}")
         train_ds, val_ds, test_ds = ldd.load_torchvision_data_oxford_pets(root=root, augment=data_cfg.use_augment)
+
         num_classes = 37
         input_channels = 3
         input_size = 224

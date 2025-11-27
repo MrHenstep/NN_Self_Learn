@@ -1,181 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Sequence
+import os
+import random
+from collections import defaultdict
+from typing import Callable, Optional, Sequence
 
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets, transforms
-from torchvision.datasets.folder import default_loader
-from collections import defaultdict
-import random
-import os
 
+from . import config
+from . import transforms as custom_transforms
+from . import custom_datasets
 
-@dataclass(frozen=True)
-class DatasetConfig:
-    key: str
-    dataset_cls: Callable[..., Dataset]
-    default_val_split: int
-    augment_builder: Optional[Callable[[torch.Tensor, torch.Tensor, int], transforms.Compose]]
-    default_augment: bool
-    display_name: str
-
-
-@dataclass
-class DatasetBundle:
-    train: Dataset
-    val: Dataset
-    test: Dataset
-    mean: torch.Tensor
-    std: torch.Tensor
-    image_size: int
-    num_channels: int
-    class_names: Optional[Sequence[str]]
-
-
-def _mnist_augment(mean: torch.Tensor, std: torch.Tensor, image_size: int) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.RandomCrop(image_size, padding=2),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=8, fill=0),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-def _cifar10_augment(mean: torch.Tensor, std: torch.Tensor, image_size: int) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.RandomCrop(image_size, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.RandomErasing(p=0.5, scale=(0.02, 0.08), ratio=(0.8, 1.25), value="random"),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-def _imagenet_train_augment(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-def _imagenet_eval_transform(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-def _oxford_pets_train_augment(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.RandomResizedCrop(224, scale=(0.7, 1.0), ratio=(0.75, 1.33)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-def _oxford_pets_eval_transform(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-def _tiny_imagenet_train_augment(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.RandomResizedCrop(64, scale=(0.55, 1.0), ratio=(0.75, 1.33)),
-        transforms.RandAugment(num_ops=2, magnitude=10),
-        transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-        transforms.RandomErasing(p=0.5, scale=(0.02, 0.2), ratio=(0.3, 3.3), value="random"),
-    ])
-
-
-def _tiny_imagenet_eval_transform(mean: torch.Tensor, std: torch.Tensor) -> transforms.Compose:
-    mean_list = mean.tolist()
-    std_list = std.tolist()
-    return transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean_list, std_list),
-    ])
-
-
-_DATASET_REGISTRY: Dict[str, DatasetConfig] = {
-    "mnist": DatasetConfig(
-        key="mnist",
-        dataset_cls=datasets.MNIST,
-        default_val_split=10_000,
-        augment_builder=_mnist_augment,
-        default_augment=False,
-        display_name="MNIST",
-    ),
-    "fashion_mnist": DatasetConfig(
-        key="fashion_mnist",
-        dataset_cls=datasets.FashionMNIST,
-        default_val_split=10_000,
-        augment_builder=_mnist_augment,
-        default_augment=False,
-        display_name="FashionMNIST",
-    ),
-    "cifar10": DatasetConfig(
-        key="cifar10",
-        dataset_cls=datasets.CIFAR10,
-        default_val_split=5_000,
-        augment_builder=_cifar10_augment,
-        default_augment=True,
-        display_name="CIFAR-10",
-    ),
-    "oxford_pets": DatasetConfig(
-        key="oxford_pets",
-        dataset_cls=datasets.OxfordIIITPet,
-        default_val_split=1_000,
-        augment_builder=None,
-        default_augment=True,
-        display_name="Oxford-IIIT Pets",
-    ),
-    "tiny_imagenet": DatasetConfig(
-        key="tiny_imagenet",
-        dataset_cls=None,  # handled separately
-        default_val_split=0,
-        augment_builder=None,
-        default_augment=True,
-        display_name="Tiny ImageNet",
-    ),
-    "imagenet": DatasetConfig(
-        key="imagenet",
-        dataset_cls=datasets.ImageNet,
-        default_val_split=0,
-        augment_builder=None,
-        default_augment=True,
-        display_name="ImageNet",
-    ),
-}
+# Re-export for convenience
+DatasetBundle = config.DatasetBundle
+DatasetConfig = config.DatasetConfig
 
 
 def _compute_mean_std(dataset_cls: Callable[..., Dataset], root: str, download: bool) -> tuple[torch.Tensor, torch.Tensor, int, int, Optional[Sequence[str]]]:
@@ -227,7 +67,7 @@ def _compute_mean_std_from_dataset(dataset: Dataset, batch_size: int = 64) -> tu
 
 
 def _load_oxford_pets(
-    config: DatasetConfig,
+    dataset_config: DatasetConfig,
     *,
     root: str,
     val_split: Optional[int],
@@ -253,9 +93,9 @@ def _load_oxford_pets(
     num_channels = base_trainval[0][0].shape[0]
     image_size = base_trainval[0][0].shape[-1]
 
-    eval_transform = _oxford_pets_eval_transform(mean, std)
-    use_augment = config.default_augment if augment is None else augment
-    train_transform = _oxford_pets_train_augment(mean, std) if use_augment else eval_transform
+    eval_transform = custom_transforms.oxford_pets_eval_transform(mean, std)
+    use_augment = dataset_config.default_augment if augment is None else augment
+    train_transform = custom_transforms.oxford_pets_train_augment(mean, std) if use_augment else eval_transform
 
     train_dataset = datasets.OxfordIIITPet(
         root=root,
@@ -272,7 +112,7 @@ def _load_oxford_pets(
         transform=eval_transform,
     )
 
-    split = config.default_val_split if val_split is None else val_split
+    split = dataset_config.default_val_split if val_split is None else val_split
     total = len(train_dataset)
     if split <= 0 or split >= total:
         raise ValueError(f"val_split must be in (0, {total}), got {split}")
@@ -416,80 +256,8 @@ def _load_oxford_pets(
     )
 
 
-def _parse_tiny_imagenet_val_annotations(val_dir: str) -> dict[str, str]:
-    annotations_path = os.path.join(val_dir, "val_annotations.txt")
-    mapping: dict[str, str] = {}
-    with open(annotations_path, "r") as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                filename, wnid = parts[0], parts[1]
-                mapping[filename] = wnid
-    return mapping
-
-
-class TinyImageNetDataset(Dataset):
-    def __init__(
-        self,
-        samples: list[tuple[str, int]],
-        classes: Sequence[str],
-        transform: Optional[Callable] = None,
-        loader=default_loader,
-    ):
-        self.samples = samples
-        self.transform = transform
-        self.loader = loader
-        self.classes = list(classes)
-        self.targets = [target for _, target in samples]
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, index: int):
-        path, target = self.samples[index]
-        image = self.loader(path)
-        if self.transform is not None:
-            image = self.transform(image)
-        return image, target
-
-
-def _gather_tiny_imagenet_samples(root: str) -> tuple[list[tuple[str, int]], list[tuple[str, int]], dict[str, int], list[str]]:
-    train_dir = os.path.join(root, "train")
-    if not os.path.isdir(train_dir):
-        raise RuntimeError(f"Tiny ImageNet train directory not found at '{train_dir}'.")
-
-    class_names = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
-    class_to_idx = {cls_name: idx for idx, cls_name in enumerate(class_names)}
-
-    train_samples: list[tuple[str, int]] = []
-    for cls_name, cls_idx in class_to_idx.items():
-        cls_images = os.path.join(train_dir, cls_name, "images")
-        if not os.path.isdir(cls_images):
-            continue
-        for fname in os.listdir(cls_images):
-            if fname.lower().endswith((".jpeg", ".jpg", ".png")):
-                train_samples.append((os.path.join(cls_images, fname), cls_idx))
-
-    val_dir = os.path.join(root, "val")
-    if not os.path.isdir(val_dir):
-        raise RuntimeError(f"Tiny ImageNet val directory not found at '{val_dir}'.")
-    mapping = _parse_tiny_imagenet_val_annotations(val_dir)
-    val_images_dir = os.path.join(val_dir, "images")
-    val_samples: list[tuple[str, int]] = []
-    for fname, wnid in mapping.items():
-        cls_idx = class_to_idx.get(wnid)
-        if cls_idx is None:
-            continue
-        path = os.path.join(val_images_dir, fname)
-        if os.path.isfile(path):
-            val_samples.append((path, cls_idx))
-
-    classes = sorted(class_to_idx, key=class_to_idx.get)
-    return train_samples, val_samples, class_to_idx, classes
-
-
 def _load_imagenet(
-    config: DatasetConfig,
+    dataset_config: DatasetConfig,
     *,
     root: str,
     val_split: Optional[int],
@@ -503,9 +271,9 @@ def _load_imagenet(
     mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32)
     std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32)
 
-    eval_transform = _imagenet_eval_transform(mean, std)
-    use_augment = config.default_augment if augment is None else augment
-    train_transform = _imagenet_train_augment(mean, std) if use_augment else eval_transform
+    eval_transform = custom_transforms.imagenet_eval_transform(mean, std)
+    use_augment = dataset_config.default_augment if augment is None else augment
+    train_transform = custom_transforms.imagenet_train_augment(mean, std) if use_augment else eval_transform
 
     try:
         train_set = datasets.ImageNet(root=root, split="train", transform=train_transform)
@@ -569,17 +337,17 @@ def _load_tiny_imagenet(
         if verbose:
             print("Automatic download for Tiny ImageNet is not supported. Ensure data is extracted under 'tiny-imagenet-200/'.")
 
-    train_samples, val_samples, class_to_idx, classes = _gather_tiny_imagenet_samples(root)
+    train_samples, val_samples, class_to_idx, classes = custom_datasets.gather_tiny_imagenet_samples(root)
 
-    stats_dataset = TinyImageNetDataset(train_samples, classes, transform=transforms.ToTensor())
+    stats_dataset = custom_datasets.TinyImageNetDataset(train_samples, classes, transform=transforms.ToTensor())
     mean, std = _compute_mean_std_from_dataset(stats_dataset, batch_size=256)
 
     use_augment = True if augment is None else augment
-    train_transform = _tiny_imagenet_train_augment(mean, std) if use_augment else _tiny_imagenet_eval_transform(mean, std)
-    eval_transform = _tiny_imagenet_eval_transform(mean, std)
+    train_transform = custom_transforms.tiny_imagenet_train_augment(mean, std) if use_augment else custom_transforms.tiny_imagenet_eval_transform(mean, std)
+    eval_transform = custom_transforms.tiny_imagenet_eval_transform(mean, std)
 
-    train_dataset = TinyImageNetDataset(train_samples, classes, transform=train_transform)
-    eval_dataset = TinyImageNetDataset(val_samples, classes, transform=eval_transform)
+    train_dataset = custom_datasets.TinyImageNetDataset(train_samples, classes, transform=train_transform)
+    eval_dataset = custom_datasets.TinyImageNetDataset(val_samples, classes, transform=eval_transform)
 
     total_val = len(val_samples)
     split = total_val // 2 if val_split is None else val_split
@@ -623,14 +391,14 @@ def load_dataset(
     verbose: bool = True,
 ) -> DatasetBundle:
     key = name.lower()
-    if key not in _DATASET_REGISTRY:
-        raise ValueError(f"Unknown dataset '{name}'. Available: {sorted(_DATASET_REGISTRY)}")
+    if key not in config.DATASET_REGISTRY:
+        raise ValueError(f"Unknown dataset '{name}'. Available: {sorted(config.DATASET_REGISTRY)}")
 
-    config = _DATASET_REGISTRY[key]
-    dataset_cls = config.dataset_cls
+    dataset_config = config.DATASET_REGISTRY[key]
+    dataset_cls = dataset_config.dataset_cls
     if key == "oxford_pets":
         return _load_oxford_pets(
-            config,
+            dataset_config,
             root=root,
             val_split=val_split,
             augment=augment,
@@ -639,7 +407,7 @@ def load_dataset(
         )
     if key == "imagenet":
         return _load_imagenet(
-            config,
+            dataset_config,
             root=root,
             val_split=val_split,
             augment=augment,
@@ -662,9 +430,9 @@ def load_dataset(
         transforms.Normalize(mean.tolist(), std.tolist()),
     ])
 
-    use_augment = config.default_augment if augment is None else augment
-    if use_augment and config.augment_builder is not None:
-        train_transform = config.augment_builder(mean, std, image_size)
+    use_augment = dataset_config.default_augment if augment is None else augment
+    if use_augment and dataset_config.augment_builder is not None:
+        train_transform = dataset_config.augment_builder(mean, std, image_size)
     else:
         train_transform = base_transform
 
@@ -672,7 +440,7 @@ def load_dataset(
     aug_train = dataset_cls(root=root, train=True, download=download, transform=train_transform)
     test_set = dataset_cls(root=root, train=False, download=download, transform=base_transform)
 
-    split = config.default_val_split if val_split is None else val_split
+    split = dataset_config.default_val_split if val_split is None else val_split
     if split <= 0 or split >= len(raw_train):
         raise ValueError(f"val_split must be in (0, {len(raw_train)}), got {split}")
 
@@ -683,7 +451,7 @@ def load_dataset(
     val_subset = Subset(raw_train, val_indices)
 
     if verbose:
-        print(f"{config.display_name} stats: mean={mean.tolist()}, std={std.tolist()}")
+        print(f"{dataset_config.display_name} stats: mean={mean.tolist()}, std={std.tolist()}")
         print(f"Image size: {image_size}x{image_size}")
         print("Using data augmentation for training set" if use_augment else "No data augmentation for training set")
         print("Train (subset):", len(train_subset))

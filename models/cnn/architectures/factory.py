@@ -1,14 +1,18 @@
-from .configs import ModelConfig, DataMetadata
-from . import CNN_model as cnnmodel
-from . import CNN_model_2 as cnnflexi
-from . import ResNet_model as rn
+from ..config import ModelConfig, DataMetadata
+from . import cnn_baseline as cnnmodel
+from . import cnn_improved as cnnflexi
+from . import resnet as rn
 
 
 def build_model(model_cfg: ModelConfig, data_meta: DataMetadata):
     name = model_cfg.model_name.lower()
 
     if name == "simplecnn":
-        model = cnnmodel.SimpleCNN(input_size=data_meta.input_size, num_classes=data_meta.num_classes)
+        model = cnnmodel.SimpleCNN(
+            input_size=data_meta.input_size, 
+            num_classes=data_meta.num_classes,
+            input_channels=data_meta.input_channels
+        )
     elif name == "cnnflexi":
         model = cnnflexi.SimpleCNNFlexi(
             input_channels=data_meta.input_channels,
