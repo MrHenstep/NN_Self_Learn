@@ -7,3 +7,7 @@ how_to_commit.txt
 __pycache__/
 
 /xdata
+
+/todelete
+
+*.xls*
