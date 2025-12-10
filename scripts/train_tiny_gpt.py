@@ -33,11 +33,11 @@ DEFAULT_TEXT = (
     "You can also supply your own text file for training."
 )
 
-def show_predictions(model, tokenizer, data, cfg, num_samples=3):
+def show_predictions(model, tokenizer, data, cfg, device, num_samples=3):
     """Show model predictions vs. ground truth on random samples."""
     model.eval()
     with torch.no_grad():
-        X, Y = get_batch(data, cfg.block_size, cfg.batch_size, cfg.device)
+        X, Y = get_batch(data, cfg.block_size, cfg.batch_size, device)
         logits, _ = model(X, Y)
         probs = F.softmax(logits, dim=-1)  # (B, T, V)
         
@@ -61,11 +61,11 @@ def show_predictions(model, tokenizer, data, cfg, num_samples=3):
     
     model.train()
 
-def calculate_accuracy(model, data, cfg):
+def calculate_accuracy(model, data, cfg, device):
     """Calculate top-1 and top-5 accuracy on validation data."""
     model.eval()
     with torch.no_grad():
-        X, Y = get_batch(data, cfg.block_size, cfg.batch_size, cfg.device)
+        X, Y = get_batch(data, cfg.block_size, cfg.batch_size, device)
         logits, _ = model(X, Y)
         
         # Top-1 accuracy
@@ -91,17 +91,24 @@ def main():
         batch_size=32,
         max_steps=2000
     )
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
+    cfg.device = device_str
+    print(f"Using device: {device_str}")
     
-    data_text_file = "tiny_shakespeare\\tiny_shakespeare.txt"  
+    data_text_file = "tiny_shakespeare/tiny_shakespeare.txt"  
     # data_text_file = None  # use default text
 
     # Reproducibility
     random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
+    if device_str == "cuda":
+        torch.cuda.manual_seed_all(cfg.seed)
+    
 
     # Load text
     if data_text_file:
-        with open("data\\" + data_text_file, "r", encoding="utf-8") as f:
+        with open("data/" + data_text_file, "r", encoding="utf-8") as f:
             text = f.read()
     else:
         text = DEFAULT_TEXT
@@ -118,7 +125,7 @@ def main():
 
     # Ensure vocab size is set before building the model
     cfg.vocab_size = tok.vocab_size
-    model = TinyGPT(cfg).to(cfg.device)
+    model = TinyGPT(cfg).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
 
     print(f"Vocab size: {tok.vocab_size}, Train tokens: {len(train_data)}, Val tokens: {len(val_data)}")
@@ -126,29 +133,29 @@ def main():
 
     # Training
     model.train()
-    t0 = time.time()
     for step in range(1, cfg.max_steps + 1):
-        xb, yb = get_batch(train_data, cfg.block_size, cfg.batch_size, cfg.device)
+        t0 = time.time()
+        xb, yb = get_batch(train_data, cfg.block_size, cfg.batch_size, device)
         _, loss = model(xb, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
-        if step % cfg.eval_interval == 0 or step == 1:
-            val_loss = estimate_loss(model, val_data, cfg)
-            elapsed = time.time() - t0
-            print(f"\n step {step:4d}/{cfg.max_steps} | train loss {loss.item():.3f} | val loss {val_loss:.3f} | {elapsed:.1f}s")
-
         # if step % cfg.eval_interval == 0 or step == 1:
         #     val_loss = estimate_loss(model, val_data, cfg)
-        #     perplexity = torch.exp(torch.tensor(val_loss)).item()
-        #     top1, top5 = calculate_accuracy(model, val_data, cfg)
-        #     elapsed = time.time() - t0
+        #     epoch_time = time.time() - t0
+        #     print(f"\n step {step:4d}/{cfg.max_steps} | train loss {loss.item():.3f} | val loss {val_loss:.3f} | {epoch_time:.1f}s")
+
+        if step % cfg.eval_interval == 0 or step == 1:
+            val_loss = estimate_loss(model, val_data, cfg, device=device)
+            perplexity = torch.exp(torch.tensor(val_loss)).item()
+            top1, top5 = calculate_accuracy(model, val_data, cfg, device)
+            step_time = time.time() - t0
             
-        #     print(f"\nstep {step:4d}/{cfg.max_steps} | {elapsed:.1f}s")
-        #     print(f"  train loss: {loss.item():.3f}")
-        #     print(f"  val loss: {val_loss:.3f} | perplexity: {perplexity:.2f}")
-        #     print(f"  accuracy: top-1={top1:.1%}, top-5={top5:.1%}")
+            print(f"\nstep {step:4d}/{cfg.max_steps} | Step time {step_time:.1f}s")
+            print(f"  train loss: {loss.item():.3f}")
+            print(f"  val loss: {val_loss:.3f} | perplexity: {perplexity:.2f}")
+            print(f"  accuracy: top-1={top1:.1%}, top-5={top5:.1%}")
             
         #     # Show predictions every few intervals
         #     if step % (cfg.eval_interval * 2) == 0:
@@ -164,10 +171,12 @@ def main():
             # Generation demo
             print("\n=== Generation ===")
             start_text = "Short "
-            start_ids = torch.tensor([tok.encode(start_text)], dtype=torch.long).to(cfg.device)
+            start_ids = torch.tensor([tok.encode(start_text)], dtype=torch.long).to(device)
             # Use eval_tokens for generation length (no gen_tokens in Config)
             out = model.generate(start_ids, max_new_tokens=cfg.eval_tokens)[0].tolist()
             print(tok.decode(out))
+
+            print("\n" + "="*40 + "\n")
 
 if __name__ == "__main__":
     main()
