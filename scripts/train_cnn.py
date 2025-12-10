@@ -3,11 +3,16 @@ from pathlib import Path
 import subprocess
 import datetime
 import torch
+import os
 
 # Add project root to sys.path
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+# change cwd to _ROOT if it's different - copes with running in interactive window
+if os.getcwd() != _ROOT:
+    os.chdir(_ROOT)
 
 from models.cnn.config import DataConfig, ModelConfig, TrainConfig
 from models.cnn.engine import run_training

@@ -9,11 +9,16 @@ import sys
 from pathlib import Path
 import numpy as np
 import torch
+import os
 
 # Add project root to sys.path
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+# change cwd to _ROOT if it's different - copes with running in interactive window
+if os.getcwd() != _ROOT:
+    os.chdir(_ROOT)
 
 from models.perceptron.MLP import MLP, MLP_torch
 

@@ -24,7 +24,7 @@ def build_dataloaders(data_cfg: DataConfig, device: torch.device) -> Tuple[DataL
         default_batch = 64
         default_eval_batch = 128
     elif key_lower == "tiny_imagenet":
-        root = data_cfg.root or "data"
+        root = data_cfg.root or "data/tiny-imagenet-200"
         
         print(f"Loading Tiny ImageNet data from {root} with augment={data_cfg.use_augment}")
         train_ds, val_ds, test_ds = ldd.load_torchvision_data_tiny_imagenet(root=root, augment=data_cfg.use_augment)
