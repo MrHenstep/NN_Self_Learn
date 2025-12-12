@@ -24,7 +24,7 @@ if os.getcwd() != _ROOT:
 
 from models.transformers.tiny_gpt_utilities import get_batch, estimate_loss, plot_training_curves
 from models.transformers.tiny_gpt_config import Config
-from models.transformers.tiny_gpt_tokenizer import CharTokenizer
+from models.transformers.tiny_gpt_tokenizer import CharTokenizer, build_or_load_bytebpe
 from models.transformers.tiny_gpt_transformerblocks import Block
 from models.transformers.tiny_gpt_model import TinyGPT
 
@@ -87,25 +87,25 @@ def main():
     # cfg = Config()  
 
     # original minimal config
-    cfg = Config(
-        block_size=128,
-        n_embd=128,
-        n_layer=4,
-        n_head=4,
-        batch_size=32,
-        max_steps=2000
-    )
+    # cfg = Config(
+    #     block_size=128,
+    #     n_embd=128,
+    #     n_layer=4,
+    #     n_head=4,
+    #     batch_size=32,
+    #     max_steps=2000
+    # )
 
     # larger config for use on GPUs
-    # cfg = Config(
-    #     block_size=256,
-    #     n_embd=256,
-    #     n_layer=8,
-    #     n_head=8,
-    #     batch_size=64,
-    #     max_steps=20000,
-    #     # eval_interval=500,
-    # )
+    cfg = Config(
+        block_size=256,
+        n_embd=256,
+        n_layer=8,
+        n_head=8,
+        batch_size=64,
+        max_steps=5000,
+        # eval_interval=500,
+    )
 
 
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -135,8 +135,33 @@ def main():
           f"{data_text_file if data_text_file else 'default text'}")
 
     # Tokenizer & data
-    tok = CharTokenizer(text)
-    data = torch.tensor(tok.encode(text), dtype=torch.long)
+
+    # tok = CharTokenizer(text)
+    # data = torch.tensor(tok.encode(text), dtype=torch.long)
+
+    # Tune BPE for tiny model capacity: smaller vocab, higher min freq
+    bpe_vocab_size = 2048
+    bpe_min_freq = 5
+    # Change cache dir to avoid reusing old tokenizer artifacts
+    bpe_cache_dir = "bpe_tok_2k"
+
+    tok = build_or_load_bytebpe(
+        text_file="data/" + data_text_file,
+        vocab_size=bpe_vocab_size,
+        min_frequency=bpe_min_freq,
+        cache_dir=bpe_cache_dir,
+    )
+
+    # Prepend BOS to training stream if available to stabilize sequence starts
+    bos_id = getattr(tok, "bos_token_id", None)
+    encoded = tok.encode(text)
+    if bos_id is not None:
+        encoded = [bos_id] + encoded
+    data = torch.tensor(encoded, dtype=torch.long)
+
+
+
+    # Train/val split
     n = int(0.9 * len(data))
     train_data, val_data = data[:n], data[n:]
 
@@ -205,7 +230,12 @@ def main():
     
     print("\n=== Generation ===\n")
     start_text = "Alas "
-    start_ids = torch.tensor([tok.encode(start_text)], dtype=torch.long).to(device)
+    # Prepend BOS to the prompt when available
+    bos_id = getattr(tok, "bos_token_id", None)
+    prompt_ids = tok.encode(start_text)
+    if bos_id is not None:
+        prompt_ids = [bos_id] + prompt_ids
+    start_ids = torch.tensor([prompt_ids], dtype=torch.long).to(device)
     # Use eval_tokens for generation length (no gen_tokens in Config)
     out = model.generate(start_ids, max_new_tokens=cfg.eval_tokens)[0].tolist()
     print(tok.decode(out))
