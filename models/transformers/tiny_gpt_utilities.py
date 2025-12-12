@@ -1,4 +1,6 @@
 import torch
+import matplotlib.pyplot as plt
+import numpy as np
 from models.transformers.tiny_gpt_config import Config
 
 def _as_device(device):
@@ -48,3 +50,54 @@ def estimate_loss(model, data, cfg: Config, device=None):
     model.train()
     # Return scalar loss value
     return loss.item()
+
+def plot_training_curves(history_df, save_path=None):
+    """
+    Plot training curves for loss and accuracy metrics.
+    
+    Args:
+        history_df: pandas DataFrame with columns: step, train_loss, val_loss, 
+                   perplexity, top1_acc, top5_acc
+        save_path: Optional path to save the figure (e.g., 'training_curves.png')
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Plot 1: Loss and Perplexity curves
+    ax1 = axes[0]
+    line1 = ax1.plot(history_df['step'], history_df['train_loss'], 'o-', label='Train Loss', alpha=0.7)
+    line2 = ax1.plot(history_df['step'], history_df['val_loss'], 's-', label='Val Loss', alpha=0.7)
+    ax1.set_xlabel('Step')
+    ax1.set_ylabel('Loss')
+    ax1.set_title('Training and Validation Loss')
+    ax1.set_ylim(bottom=0)
+    ax1.grid(True, alpha=0.3)
+    
+    # Add secondary y-axis for perplexity
+    ax1_perp = ax1.twinx()
+    line3 = ax1_perp.plot(history_df['step'], history_df['perplexity'], '^--', label='Perplexity', alpha=0.6, color='purple')
+    ax1_perp.set_ylabel('Perplexity')
+    ax1_perp.set_ylim(bottom=0)
+    
+    # Combine legends from both axes
+    lines = line1 + line2 + line3
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc='upper left')
+    
+    # Plot 2: Accuracy curves
+    ax2 = axes[1]
+    ax2.plot(history_df['step'], history_df['top1_acc'] * 100, 'o-', label='Top-1 Accuracy', alpha=0.7)
+    ax2.plot(history_df['step'], history_df['top5_acc'] * 100, 's-', label='Top-5 Accuracy', alpha=0.7)
+    ax2.set_xlabel('Step')
+    ax2.set_ylabel('Accuracy (%)')
+    ax2.set_title('Top-1 and Top-5 Accuracy')
+    ax2.set_ylim(bottom=0)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Training curves saved to {save_path}")
+    
+    plt.show()

@@ -51,6 +51,16 @@ class TinyGPT(nn.Module):
             logits, _ = self(idx_cond)                # model gives us logits for next token for all tokens in the sequence
             next_logits = logits[:, -1, :]            # but we only want the last token's logits
             probs = F.softmax(next_logits, dim=-1)    # convert logits to probabilities
-            next_id = torch.multinomial(probs, num_samples=1)  # sample from the distribution
+            # next_id = torch.multinomial(probs, num_samples=1)  # sample from the distribution
+            next_id = self.sample_next_logits(next_logits, temperature=0.8, top_k=40)
             idx = torch.cat([idx, next_id], dim=1) # append sampled token to the sequence and loop to the next new token to be generated
         return idx
+
+    def sample_next_logits(self, logits, temperature=1.0, top_k=None):
+        logits = logits / temperature
+        if top_k is not None:
+            v, ix = torch.topk(logits, top_k)
+            mask = logits < v[:, [-1]]
+            logits[mask] = -float("inf")
+        probs = F.softmax(logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
