@@ -17,10 +17,10 @@ class Config:
     # Training hyperparameters
     batch_size: int = 32             # Number of sequences per training step
     max_steps: int = 800             # Total number of optimisation steps
+    
     lr: float = 3e-3                 # Learning rate for AdamW optimiser
+    weight_decay: float = 0.01      # Weight decay for AdamW optimiser
+    
     eval_interval: int = 100         # Evaluate validation loss every N steps
     eval_tokens: int = 200           # Number of tokens used for quick eval (unused in minimal code)
 
-    # Reproducibility / device
-    seed: int = 1234                 # Random seed for reproducibility
-    device: str = "cpu"              # Device to train on ("cpu" for this tiny model)

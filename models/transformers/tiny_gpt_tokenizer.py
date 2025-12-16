@@ -14,20 +14,64 @@ class CharTokenizer:
     def decode(self, ids):
         return "".join(self.itos[i] for i in ids)
 
+    def state_dict(self):
+        # Persist vocabulary ordering to reconstruct stoi/itos later
+        itos = [ch for _, ch in sorted(self.itos.items())]
+        return {"type": "char", "itos": itos}
+
+    @classmethod
+    def from_state_dict(cls, state):
+        if state.get("type") != "char":
+            raise ValueError("Invalid tokenizer state for CharTokenizer")
+        itos = state.get("itos")
+        if itos is None:
+            raise ValueError("Missing itos in tokenizer state")
+        text = "".join(itos)  # minimal text to rebuild
+        tok = cls(text)
+        return tok
+
 class ByteBPETokenizerWrapper:
     """
     Minimal wrapper around Hugging Face ByteLevelBPETokenizer
     providing encode/decode + vocab_size, matching your CharTokenizer interface.
     """
-    def __init__(self, tokenizer: ByteLevelBPETokenizer):
+    def __init__(self, tokenizer: ByteLevelBPETokenizer, vocab_path=None, merges_path=None, cache_dir=None):
         self._tok = tokenizer
         self.vocab_size = tokenizer.get_vocab_size()
+        # Surface common special token ids so training/generation can use them
+        self.bos_token_id = tokenizer.token_to_id("<bos>")
+        self.eos_token_id = tokenizer.token_to_id("<eos>")
+        self.pad_token_id = tokenizer.token_to_id("<pad>")
+        # Save paths for reconstruction
+        self.vocab_path = vocab_path
+        self.merges_path = merges_path
+        self.cache_dir = cache_dir
 
     def encode(self, s: str):
         return self._tok.encode(s).ids
 
     def decode(self, ids):
         return self._tok.decode(ids)
+
+    def state_dict(self):
+        return {
+            "type": "bytebpe",
+            "vocab_path": self.vocab_path,
+            "merges_path": self.merges_path,
+            "cache_dir": self.cache_dir,
+            "vocab_size": self.vocab_size,
+        }
+
+    @classmethod
+    def from_state_dict(cls, state):
+        if state.get("type") != "bytebpe":
+            raise ValueError("Invalid tokenizer state for ByteBPETokenizerWrapper")
+        vocab_path = state.get("vocab_path")
+        merges_path = state.get("merges_path")
+        if not vocab_path or not merges_path:
+            raise ValueError("Missing vocab/merges paths in tokenizer state")
+        tok = ByteLevelBPETokenizer(vocab_path, merges_path)
+        return cls(tok, vocab_path=vocab_path, merges_path=merges_path, cache_dir=state.get("cache_dir"))
 
 
 def build_or_load_bytebpe(text_file: str,
@@ -56,4 +100,4 @@ def build_or_load_bytebpe(text_file: str,
         )
         bpe.save_model(cache_dir)
 
-    return ByteBPETokenizerWrapper(bpe)
+    return ByteBPETokenizerWrapper(bpe, vocab_path=vocab_path, merges_path=merges_path, cache_dir=cache_dir)

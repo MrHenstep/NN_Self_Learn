@@ -1,5 +1,8 @@
 how_to_commit.txt
 
+*.png*
+*.jpg*
+
 /cnns/data
 /data
 
@@ -13,3 +16,13 @@ __pycache__/
 *.xls*
 
 /to_delete
+
+
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+
+/checkpoints
