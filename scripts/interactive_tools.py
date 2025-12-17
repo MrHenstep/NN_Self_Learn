@@ -29,6 +29,8 @@ from models.transformers.tiny_gpt_transformerblocks import Block
 from models.transformers.tiny_gpt_model import TinyGPT
 import math
 
-from scripts.train_tiny_gpt import show_sample_generation, build_bytebpe_tokenizer, load_checkpoint_for_generation, generate_from_checkpoint
+from scripts.train_tiny_gpt import get_sample_generation, build_bytebpe_tokenizer, load_checkpoint_for_generation, generate_from_checkpoint
 
 # model, tok, cfg, device = load_checkpoint_for_generation("checkpoints", "tiny_gpt_checkpoint.pth")
+
+#show_sample_generation(tok, model, cfg, device, prompt_text="Sojourn ", max_tokens=cfg.eval_tokens)
