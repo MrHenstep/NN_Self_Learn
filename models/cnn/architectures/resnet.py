@@ -165,18 +165,46 @@ class ResNetCF(nn.Module):
                     nn.init.zeros_(m.bias)
 
         print(f"ResNet-{6*resnet_n + 2} Model Created")
-    
-    def forward(self, x):
 
+    @property
+    def feature_dim(self) -> int:
+        """Return the dimensionality of the feature embeddings (before classifier)."""
+        return 64
+    
+    def forward_features(self, x):
+        """Extract feature embeddings before the classifier head.
+        
+        Args:
+            x: Input tensor of shape (N, 3, H, W)
+            
+        Returns:
+            Feature tensor of shape (N, 64)
+        """
         x = self.relu(self.batchnorm1(self.conv1(x)))
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.avgpool(x)
-        x = torch.flatten(x, 1)            # (N, 512)
-        x = self.fc(x)                     # (N, n_classes) logits; no ReLU/softmax here
-
+        x = torch.flatten(x, 1)  # (N, 64)
         return x
+    
+    def forward(self, x, return_features: bool = False):
+        """Forward pass through the network.
+        
+        Args:
+            x: Input tensor of shape (N, 3, H, W)
+            return_features: If True, also return intermediate features
+            
+        Returns:
+            If return_features is False: logits of shape (N, n_classes)
+            If return_features is True: tuple of (features, logits)
+        """
+        features = self.forward_features(x)
+        logits = self.fc(features)
+        
+        if return_features:
+            return features, logits
+        return logits
 
 class ResNetIN(nn.Module):
 

@@ -41,6 +41,50 @@ class TrainConfig:
     test_after_training: bool = True
 
 @dataclass
+class ContrastiveConfig:
+    """Configuration for contrastive learning (SimCLR-style).
+    
+    Attributes:
+        temperature: Temperature parameter for NT-Xent loss (lower = sharper)
+        projection_dim: Output dimension of projection head
+        projection_hidden: Hidden dimension of projection head MLP
+        use_bn_in_head: Whether to use BatchNorm in projection head
+        pretrain_epochs: Number of epochs for contrastive pre-training
+        pretrain_lr: Learning rate for pre-training
+        pretrain_weight_decay: Weight decay for pre-training
+        pretrain_batch_size: Batch size for pre-training (larger is better)
+        warmup_epochs: Warmup epochs for pre-training
+        finetune_epochs: Number of epochs for fine-tuning
+        finetune_lr: Learning rate for fine-tuning
+        finetune_weight_decay: Weight decay for fine-tuning
+        linear_eval: If True, freeze backbone and only train classifier
+        color_jitter_strength: Strength of color jitter augmentation
+    """
+    # Loss parameters
+    temperature: float = 0.5
+    
+    # Projection head parameters
+    projection_dim: int = 128
+    projection_hidden: int = 512
+    use_bn_in_head: bool = True
+    
+    # Pre-training parameters
+    pretrain_epochs: int = 500
+    pretrain_lr: float = 0.5  # SimCLR uses high LR with LARS
+    pretrain_weight_decay: float = 1e-4
+    pretrain_batch_size: int = 256
+    warmup_epochs: int = 10
+    
+    # Fine-tuning parameters
+    finetune_epochs: int = 100
+    finetune_lr: float = 0.1
+    finetune_weight_decay: float = 1e-3
+    linear_eval: bool = False  # If True, freeze backbone
+    
+    # Augmentation parameters
+    color_jitter_strength: float = 1.0
+
+@dataclass
 class DataMetadata:
     dataset_key: str
     num_classes: int

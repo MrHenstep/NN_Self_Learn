@@ -42,7 +42,8 @@ if __name__ == "__main__":
     print("Using device:", device)
 
     # ---- Configuration (edit here just before run) ----
-    data_cfg = DataConfig(dataset_key="tiny_imagenet", use_augment=None)
+    # data_cfg = DataConfig(dataset_key="tiny_imagenet", use_augment=None)
+    data_cfg = DataConfig(dataset_key="cifar10", use_augment=True)
     model_cfg = ModelConfig(model_name="resnet", resnet_n=3, use_projection=None, use_residual=True)
     train_cfg = TrainConfig(
         num_epochs=200,
