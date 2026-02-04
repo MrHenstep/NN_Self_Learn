@@ -14,4 +14,8 @@ dependencies:
   - scipy
   - scikit-learn
   - pytest
+  - seaborn
+  - pip
+  - pip:
+    - umap-learn
 prefix: /cs/student/projects1/ml/2024/sdodds/miniconda3/envs/NNSelfLearn

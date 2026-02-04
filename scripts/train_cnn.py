@@ -75,3 +75,47 @@ if __name__ == "__main__":
         test_loader,
         data_meta
     )
+
+    # Save checkpoint
+    checkpoint_dir = Path("checkpoints")
+    checkpoint_dir.mkdir(exist_ok=True)
+    
+    # Use EMA model if available, otherwise use regular model
+    save_model = ema_model if ema_model is not None else model
+    
+    # Build checkpoint filename from config
+    checkpoint_name = f"resnet{6*model_cfg.resnet_n + 2}_{data_cfg.dataset_key}.pth"
+    checkpoint_path = checkpoint_dir / checkpoint_name
+    
+    # Get final validation accuracy from history
+    final_val_acc = history_df['val_acc'].iloc[-1] if 'val_acc' in history_df.columns else None
+    
+    checkpoint = {
+        'model_state_dict': save_model.state_dict(),
+        'model_config': {
+            'model_name': model_cfg.model_name,
+            'resnet_n': model_cfg.resnet_n,
+            'use_projection': model_cfg.use_projection,
+            'use_residual': model_cfg.use_residual,
+        },
+        'data_config': {
+            'dataset_key': data_cfg.dataset_key,
+            'num_classes': data_meta.num_classes,
+        },
+        'train_config': {
+            'num_epochs': train_cfg.num_epochs,
+            'learning_rate': train_cfg.learning_rate,
+            'weight_decay': train_cfg.weight_decay,
+        },
+        'final_val_acc': final_val_acc,
+    }
+    
+    torch.save(checkpoint, checkpoint_path)
+    print(f"\nCheckpoint saved to: {checkpoint_path}")
+    if final_val_acc is not None:
+        print(f"  Final validation accuracy: {final_val_acc:.2%}")
+    
+    # Also save training history
+    history_path = checkpoint_dir / f"resnet{6*model_cfg.resnet_n + 2}_{data_cfg.dataset_key}_history.csv"
+    history_df.to_csv(history_path, index=False)
+    print(f"Training history saved to: {history_path}")

@@ -3,8 +3,11 @@ how_to_commit.txt
 *.png*
 *.jpg*
 
+/chats
+
 /cnns/data
 /data
+/visualizations
 
 *.cpython-*.json
 __pycache__/
